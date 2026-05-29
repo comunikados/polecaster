@@ -1,0 +1,86 @@
+name: Build PoleCaster Windows Installer
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # permite ejecutarlo manualmente con un clic
+
+jobs:
+  build:
+    runs-on: windows-latest   # ← corre en una PC Windows real de Microsoft
+
+    steps:
+      # 1. Descargar el código
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # 2. Instalar Python 3.11
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. Instalar dependencias Python
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 python-vlc requests pyinstaller
+
+      # 4. Descargar VLC para Windows (necesario para python-vlc)
+      - name: Descargar VLC libs
+        run: |
+          curl -L "https://download.videolan.org/pub/videolan/vlc/3.0.20/win64/vlc-3.0.20-win64.zip" -o vlc.zip
+          Expand-Archive vlc.zip -DestinationPath vlc_temp
+          Move-Item vlc_temp\vlc-3.0.20 vlc_libs
+        shell: pwsh
+
+      # 5. Compilar el .exe con PyInstaller
+      - name: Compilar con PyInstaller
+        run: |
+          pyinstaller --noconsole `
+            --onedir `
+            --name=PoleCaster `
+            --add-binary "vlc_libs\libvlc.dll;." `
+            --add-binary "vlc_libs\libvlccore.dll;." `
+            --add-data "vlc_libs\plugins;plugins" `
+            --hidden-import=vlc `
+            --hidden-import=PyQt6.QtCore `
+            --hidden-import=PyQt6.QtGui `
+            --hidden-import=PyQt6.QtWidgets `
+            polecaster.py
+        shell: pwsh
+
+      # 6. Instalar Inno Setup
+      - name: Instalar Inno Setup
+        run: |
+          choco install innosetup -y
+        shell: pwsh
+
+      # 7. Crear el Setup.exe con Inno Setup
+      - name: Compilar instalador
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup_installer.iss
+        shell: pwsh
+
+      # 8. Subir el Setup.exe como artefacto descargable
+      - name: Subir instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: PoleCaster_Setup_Windows
+          path: dist_installer\PoleCaster_Setup_v2.0.exe
+          retention-days: 30
+
+      # 9. (Opcional) Crear Release si hay un tag
+      - name: Crear Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist_installer\PoleCaster_Setup_v2.0.exe
+          name: PoleCaster v2.0 — Grup Comunikados
+          body: |
+            ## PoleCaster v2.0 — Grup Comunikados
+            Automatizador de radio profesional
+            - Soporte Icecast2 + Shoutcast v1/v2
+            - Ecualizador visual animado
+            - Jingles F1-F9
+            - Scheduler de eventos
