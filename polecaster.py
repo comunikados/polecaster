@@ -985,11 +985,11 @@ class PoleCasterWindow(QMainWindow):
             act.triggered.connect(lambda _,idx=i: self._play_jingle(idx))
             self._cunas_actions.append(act)
         cm.addSeparator()
-        cm.addAction("Locución de hora",lambda: None, QKeySequence("H"))
+        _a=QAction("Locución de hora",self);_a.triggered.connect(lambda: None);_a.setShortcut(QKeySequence("H"));cm.addAction(_a)
         cm.addAction("Temperatura")
         cm.addAction("Humedad")
         cm.addSeparator()
-        cm.addAction("Editar Cuñas...",self._edit_cunas)
+        _a=QAction("Editar Cuñas...",self);_a.triggered.connect(self._edit_cunas);cm.addAction(_a)
 
         # ── LISTA ──
         lm=mb.addMenu("Lista")
@@ -1005,13 +1005,13 @@ class PoleCasterWindow(QMainWindow):
         lm.addAction("Añadir conexión de satélite")
         lm.addAction("Añadir desconexión del satélite")
         lm.addSeparator()
-        lm.addAction("Añadir radio de internet...",self._add_internet_radio)
+        _a=QAction("Añadir radio de internet...",self);_a.triggered.connect(self._add_internet_radio);lm.addAction(_a)
         lm.addSeparator()
         _a=QAction("Barajar",self);_a.triggered.connect(self._shuffle);_a.setShortcut(QKeySequence("Ctrl+K"));lm.addAction(_a)
         lm.addSeparator()
         lm.addAction("Ver duración de la selección...")
         lm.addAction("Actualizar duración")
-        lm.addAction("Actualizar todas las duraciones",self._update_all_durations)
+        lm.addAction("Actualizar todas las duraciones")
 
         # ── MEDIA ──
         mm=mb.addMenu("Media")
@@ -1035,10 +1035,10 @@ class PoleCasterWindow(QMainWindow):
 
         # ── STREAMING ──
         sm=mb.addMenu("Streaming")
-        sm.addAction("Configurar streaming...",self._show_stream_dialog)
+        _a=QAction("Configurar streaming...",self);_a.triggered.connect(self._show_stream_dialog);sm.addAction(_a)
         sm.addSeparator()
-        sm.addAction("Conectar",lambda: self._toggle_stream())
-        sm.addAction("Desconectar",lambda: self.stream_engine.disconnect_stream() if self.stream_engine.is_connected() else None)
+        _a=QAction("Conectar",self);_a.triggered.connect(self._toggle_stream);sm.addAction(_a)
+        _a=QAction("Desconectar",self);_a.triggered.connect(lambda: self.stream_engine.disconnect_stream());sm.addAction(_a)
         sm.addSeparator()
         sm.addAction("Ver estadísticas")
 
@@ -1047,10 +1047,12 @@ class PoleCasterWindow(QMainWindow):
         aym.addAction("Manual de usuario")
         aym.addAction("Soporte técnico")
         aym.addSeparator()
-        aym.addAction(f"Acerca de {APP_NAME}",lambda: QMessageBox.about(self,APP_NAME,
+        _a=QAction(f"Acerca de {APP_NAME}",self)
+        _a.triggered.connect(lambda: QMessageBox.about(self,APP_NAME,
             f"<b>{APP_NAME} v{APP_VERSION}</b><br><i>{APP_BRAND}</i><br><br>"
             "Automatizador de Radio Profesional<br>Icecast2 + Shoutcast v1/v2<br><br>"
             "Inspirado en ZaraRadio y RadioBOSS"))
+        aym.addAction(_a)
 
     # ══════════════════════════════════════
     #  TEMA CLARO / OSCURO
