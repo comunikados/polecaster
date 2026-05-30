@@ -1,12 +1,7 @@
 """
-PoleCaster v2.1 — Radio Automation Suite
-Diseño: Grup Comunikados
-Novedades v2.1:
-  - Panel Streaming rediseñado (campos legibles)
-  - Scheduler mejorado: días de semana, tipo de evento,
-    cuenta regresiva, interrumpir canción actual
-  - Botón de prueba de conexión
-Requiere: pip install PyQt6 python-vlc requests
+PoleCaster v3.0 — Radio Automation Suite
+Diseño: Grup Comunicados
+Layout basado en bosquejo oficial + inspiración ZaraRadio + RadioBOSS
 """
 
 import sys, os, json, time, threading, subprocess, random, math
@@ -18,66 +13,140 @@ from PyQt6.QtWidgets import (
     QCheckBox, QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QGroupBox, QGridLayout, QSpinBox, QFrame, QProgressBar,
     QDialog, QDialogButtonBox, QTimeEdit, QMessageBox, QSizePolicy,
-    QScrollArea
+    QScrollArea, QTreeWidget, QTreeWidgetItem, QToolBar, QStatusBar,
+    QStackedWidget, QTextEdit, QAbstractItemView, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings, QSize
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QPoint
 from PyQt6.QtGui import (
     QFont, QColor, QPalette, QPainter, QLinearGradient,
-    QPen, QAction
+    QPen, QAction, QActionGroup, QPixmap, QIcon, QKeySequence
 )
 
 APP_NAME    = "PoleCaster"
-APP_VERSION = "2.1"
-APP_BRAND   = "Grup Comunikados"
+APP_VERSION = "3.0"
+APP_BRAND   = "Grup Comunicados"
 CONFIG_FILE = "polecaster_config.json"
+DAYS_ES     = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
 
-DAYS_ES = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
+# ══════════════════════════════════════════
+#  TEMAS: OSCURO Y CLARO
+# ══════════════════════════════════════════
+THEME_DARK = """
+QMainWindow,QWidget{background:#0d0d0d;color:#e8e8e8;font-family:'Segoe UI',sans-serif;font-size:12px;}
+QMenuBar{background:#080808;color:#999;border-bottom:1px solid #1a1a1a;padding:2px;}
+QMenuBar::item:selected{background:#1a1a1a;color:#ff6600;}
+QMenu{background:#111;border:1px solid #2a2a2a;color:#ddd;}
+QMenu::item:selected{background:#ff660022;color:#ff6600;}
+QMenu::separator{height:1px;background:#2a2a2a;margin:3px 8px;}
+QToolBar{background:#0a0a0a;border-bottom:1px solid #1a1a1a;spacing:3px;padding:2px;}
+QStatusBar{background:#050505;color:#444;border-top:1px solid #111;font-size:10px;}
+QTabWidget::pane{border:1px solid #222;background:#111;}
+QTabBar::tab{background:#0a0a0a;color:#666;padding:6px 14px;border:none;font-size:11px;}
+QTabBar::tab:selected{color:#ff6600;border-bottom:2px solid #ff6600;background:#111;}
+QTabBar::tab:hover{color:#ccc;background:#141414;}
+QTableWidget{background:#111;gridline-color:#1a1a1a;border:none;alternate-background-color:#141414;}
+QTableWidget::item{padding:3px 5px;border-bottom:1px solid #141414;}
+QTableWidget::item:selected{background:#ff660020;color:#fff;}
+QHeaderView::section{background:#0a0a0a;color:#555;padding:4px 6px;border:none;font-size:10px;letter-spacing:1px;}
+QPushButton{background:#1a1a1a;color:#bbb;border:1px solid #2a2a2a;padding:4px 10px;border-radius:3px;font-size:11px;}
+QPushButton:hover{background:#242424;color:#fff;border-color:#444;}
+QPushButton:pressed{background:#0f0f0f;}
+QPushButton:checked{background:#ff660033;border-color:#ff6600;color:#ff6600;}
+QPushButton#btnPlay{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #ff6600,stop:1 #cc4400);color:#fff;font-weight:bold;border-radius:18px;border:none;font-size:14px;}
+QPushButton#btnPlay:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #ff8833,stop:1 #ee5500);}
+QPushButton#btnStop{background:#1e1e1e;color:#fff;border-radius:18px;border:1px solid #333;}
+QPushButton#btnConnect{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #cc4400);color:#fff;font-weight:bold;border:none;border-radius:3px;padding:7px;}
+QPushButton#btnDisconnect{background:#6b0000;color:#fff;font-weight:bold;border:none;border-radius:3px;padding:7px;}
+QPushButton#btnMic{background:#1a2a1a;color:#00cc66;border:1px solid #00cc6655;border-radius:3px;}
+QPushButton#btnMic:checked{background:#cc000022;color:#ff4444;border-color:#ff4444;}
+QPushButton.transport{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:3px;padding:4px 8px;font-size:11px;color:#bbb;}
+QPushButton.transport:hover{background:#2a2a2a;color:#fff;}
+QLineEdit,QComboBox,QSpinBox,QTimeEdit{background:#0a0a0a;color:#e0e0e0;border:1px solid #2a2a2a;padding:4px 7px;border-radius:3px;min-height:20px;}
+QLineEdit:focus,QComboBox:focus{border-color:#ff6600;}
+QComboBox::drop-down{border:none;width:18px;}
+QComboBox QAbstractItemView{background:#111;color:#e0e0e0;border:1px solid #333;selection-background-color:#ff660033;}
+QSlider::groove:horizontal{height:4px;background:#1e1e1e;border-radius:2px;}
+QSlider::handle:horizontal{background:#ff6600;width:12px;height:12px;border-radius:6px;margin:-4px 0;}
+QSlider::sub-page:horizontal{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #ff9933);border-radius:2px;}
+QSlider::groove:vertical{width:4px;background:#1e1e1e;border-radius:2px;}
+QSlider::handle:vertical{background:#ff6600;width:12px;height:12px;border-radius:6px;margin:0 -4px;}
+QSlider::sub-page:vertical{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ff9933,stop:1 #ff6600);border-radius:2px;}
+QProgressBar{background:#1a1a1a;border:none;border-radius:2px;height:4px;}
+QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #ffaa00);border-radius:2px;}
+QGroupBox{border:1px solid #222;border-radius:4px;margin-top:8px;padding-top:8px;color:#555;font-size:10px;letter-spacing:1px;}
+QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:#ff6600;}
+QCheckBox{color:#bbb;}
+QCheckBox::indicator{width:13px;height:13px;background:#0a0a0a;border:1px solid #333;border-radius:2px;}
+QCheckBox::indicator:checked{background:#ff6600;border-color:#ff6600;}
+QTreeWidget{background:#0d0d0d;border:none;color:#ccc;alternate-background-color:#111;}
+QTreeWidget::item:selected{background:#ff660020;color:#ff8833;}
+QTreeWidget::item:hover{background:#141414;}
+QScrollBar:vertical{background:#0a0a0a;width:5px;}
+QScrollBar::handle:vertical{background:#2a2a2a;border-radius:2px;min-height:20px;}
+QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
+QScrollBar:horizontal{background:#0a0a0a;height:5px;}
+QScrollBar::handle:horizontal{background:#2a2a2a;border-radius:2px;}
+QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0;}
+QScrollArea{border:none;background:transparent;}
+QFrame#vSep{background:#1e1e1e;max-width:1px;}
+QFrame#hSep{background:#1e1e1e;max-height:1px;}
+QSplitter::handle{background:#1a1a1a;}
+"""
 
-DARK_STYLE = """
-QMainWindow, QWidget {
-    background-color: #0d0d0d;
-    color: #e8e8e8;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 12px;
-}
-QTabWidget::pane { border: 1px solid #2a2a2a; background-color: #111; }
-QTabBar::tab { background: #0a0a0a; color: #666; padding: 7px 16px; border: none; font-size: 11px; }
-QTabBar::tab:selected { color: #ff6600; border-bottom: 2px solid #ff6600; background: #111; }
-QTabBar::tab:hover { color: #ccc; background: #161616; }
-QTableWidget { background-color: #111; gridline-color: #1a1a1a; border: none; }
-QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #141414; }
-QTableWidget::item:selected { background-color: #ff660015; color: #fff; }
-QHeaderView::section { background-color: #0a0a0a; color: #555; padding: 4px 6px; border: none; font-size: 10px; letter-spacing: 1px; }
-QPushButton { background-color: #1a1a1a; color: #bbb; border: 1px solid #333; padding: 5px 12px; border-radius: 4px; }
-QPushButton:hover { background-color: #242424; color: #fff; border-color: #444; }
-QPushButton:pressed { background-color: #0f0f0f; }
-QPushButton#btnPlay { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #ff6600,stop:1 #cc4400); color:#fff; font-weight:bold; border-radius:20px; border:none; }
-QPushButton#btnPlay:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #ff8833,stop:1 #ee5500); }
-QPushButton#btnStop { background:#1e1e1e; color:#fff; border-radius:20px; border:1px solid #333; }
-QPushButton#btnConnect { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #cc4400); color:#fff; font-weight:bold; border:none; border-radius:4px; padding:8px; }
-QPushButton#btnDisconnect { background:#8b0000; color:#fff; font-weight:bold; border:none; border-radius:4px; padding:8px; }
-QPushButton#btnTest { background:#1a3a1a; color:#00cc66; border:1px solid #00cc66; border-radius:4px; padding:6px; font-size:11px; }
-QPushButton#btnTest:hover { background:#00cc6622; }
-QLineEdit, QComboBox, QSpinBox, QTimeEdit { background:#0a0a0a; color:#e0e0e0; border:1px solid #2a2a2a; padding:5px 8px; border-radius:3px; min-height:22px; }
-QLineEdit:focus, QComboBox:focus { border-color:#ff6600; }
-QComboBox::drop-down { border:none; width:20px; }
-QComboBox QAbstractItemView { background:#111; color:#e0e0e0; border:1px solid #333; selection-background-color:#ff660033; }
-QSlider::groove:horizontal { height:4px; background:#1e1e1e; border-radius:2px; }
-QSlider::handle:horizontal { background:#ff6600; width:13px; height:13px; border-radius:7px; margin:-5px 0; }
-QSlider::sub-page:horizontal { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #ff9933); border-radius:2px; }
-QProgressBar { background:#1a1a1a; border:none; border-radius:2px; height:4px; }
-QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #ffaa00); border-radius:2px; }
-QGroupBox { border:1px solid #2a2a2a; border-radius:5px; margin-top:10px; padding-top:10px; color:#555; font-size:10px; letter-spacing:1px; }
-QGroupBox::title { subcontrol-origin:margin; left:10px; padding:0 5px; color:#ff6600; }
-QCheckBox { color:#bbb; }
-QCheckBox::indicator { width:14px; height:14px; background:#0a0a0a; border:1px solid #333; border-radius:2px; }
-QCheckBox::indicator:checked { background:#ff6600; border-color:#ff6600; }
-QScrollBar:vertical { background:#0a0a0a; width:5px; border-radius:3px; }
-QScrollBar::handle:vertical { background:#2a2a2a; border-radius:3px; min-height:20px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
-QScrollArea { border:none; background:transparent; }
-QFrame#vSep { background-color:#1e1e1e; }
-QFrame#hSep { background-color:#1e1e1e; }
+THEME_LIGHT = """
+QMainWindow,QWidget{background:#f0f0f0;color:#1a1a1a;font-family:'Segoe UI',sans-serif;font-size:12px;}
+QMenuBar{background:#e0e0e0;color:#333;border-bottom:1px solid #ccc;padding:2px;}
+QMenuBar::item:selected{background:#fff;color:#cc4400;}
+QMenu{background:#fff;border:1px solid #ccc;color:#222;}
+QMenu::item:selected{background:#ff660015;color:#cc4400;}
+QMenu::separator{height:1px;background:#ddd;margin:3px 8px;}
+QToolBar{background:#e8e8e8;border-bottom:1px solid #ccc;spacing:3px;padding:2px;}
+QStatusBar{background:#e0e0e0;color:#888;border-top:1px solid #ccc;font-size:10px;}
+QTabWidget::pane{border:1px solid #ccc;background:#fff;}
+QTabBar::tab{background:#e0e0e0;color:#888;padding:6px 14px;border:none;font-size:11px;}
+QTabBar::tab:selected{color:#cc4400;border-bottom:2px solid #ff6600;background:#fff;}
+QTabBar::tab:hover{color:#333;background:#ebebeb;}
+QTableWidget{background:#fff;gridline-color:#eee;border:none;alternate-background-color:#f8f8f8;}
+QTableWidget::item{padding:3px 5px;border-bottom:1px solid #eee;}
+QTableWidget::item:selected{background:#ff660015;color:#cc4400;}
+QHeaderView::section{background:#e8e8e8;color:#888;padding:4px 6px;border:none;font-size:10px;letter-spacing:1px;}
+QPushButton{background:#e8e8e8;color:#333;border:1px solid #ccc;padding:4px 10px;border-radius:3px;font-size:11px;}
+QPushButton:hover{background:#fff;color:#111;border-color:#aaa;}
+QPushButton:pressed{background:#e0e0e0;}
+QPushButton:checked{background:#ff660015;border-color:#ff6600;color:#cc4400;}
+QPushButton#btnPlay{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #ff6600,stop:1 #cc4400);color:#fff;font-weight:bold;border-radius:18px;border:none;font-size:14px;}
+QPushButton#btnStop{background:#ddd;color:#333;border-radius:18px;border:1px solid #ccc;}
+QPushButton#btnConnect{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff6600,stop:1 #cc4400);color:#fff;font-weight:bold;border:none;border-radius:3px;padding:7px;}
+QPushButton#btnDisconnect{background:#cc0000;color:#fff;font-weight:bold;border:none;border-radius:3px;padding:7px;}
+QPushButton#btnMic{background:#e8f8e8;color:#009933;border:1px solid #009933;border-radius:3px;}
+QPushButton#btnMic:checked{background:#ffe8e8;color:#cc0000;border-color:#cc0000;}
+QLineEdit,QComboBox,QSpinBox,QTimeEdit{background:#fff;color:#222;border:1px solid #ccc;padding:4px 7px;border-radius:3px;min-height:20px;}
+QLineEdit:focus,QComboBox:focus{border-color:#ff6600;}
+QComboBox::drop-down{border:none;width:18px;}
+QComboBox QAbstractItemView{background:#fff;color:#222;border:1px solid #ccc;selection-background-color:#ff660015;}
+QSlider::groove:horizontal{height:4px;background:#ddd;border-radius:2px;}
+QSlider::handle:horizontal{background:#ff6600;width:12px;height:12px;border-radius:6px;margin:-4px 0;}
+QSlider::sub-page:horizontal{background:#ff6600;border-radius:2px;}
+QSlider::groove:vertical{width:4px;background:#ddd;border-radius:2px;}
+QSlider::handle:vertical{background:#ff6600;width:12px;height:12px;border-radius:6px;margin:0 -4px;}
+QSlider::sub-page:vertical{background:#ff6600;border-radius:2px;}
+QProgressBar{background:#ddd;border:none;border-radius:2px;height:4px;}
+QProgressBar::chunk{background:#ff6600;border-radius:2px;}
+QGroupBox{border:1px solid #ccc;border-radius:4px;margin-top:8px;padding-top:8px;color:#888;font-size:10px;letter-spacing:1px;}
+QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:#ff6600;}
+QCheckBox{color:#333;}
+QCheckBox::indicator{width:13px;height:13px;background:#fff;border:1px solid #ccc;border-radius:2px;}
+QCheckBox::indicator:checked{background:#ff6600;border-color:#ff6600;}
+QTreeWidget{background:#fff;border:none;color:#333;alternate-background-color:#f8f8f8;}
+QTreeWidget::item:selected{background:#ff660015;color:#cc4400;}
+QScrollBar:vertical{background:#f0f0f0;width:6px;}
+QScrollBar::handle:vertical{background:#ccc;border-radius:3px;min-height:20px;}
+QScrollBar:horizontal{background:#f0f0f0;height:6px;}
+QScrollBar::handle:horizontal{background:#ccc;border-radius:3px;}
+QScrollArea{border:none;background:transparent;}
+QFrame#vSep{background:#ddd;max-width:1px;}
+QFrame#hSep{background:#ddd;max-height:1px;}
+QSplitter::handle{background:#ddd;}
 """
 
 # ══════════════════════════════════════════
@@ -86,141 +155,97 @@ QFrame#hSep { background-color:#1e1e1e; }
 class EqualizerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(80)
-        self._bars     = 32
-        self._heights  = [0.0]*self._bars
-        self._targets  = [0.0]*self._bars
-        self._peaks    = [0.0]*self._bars
-        self._peak_hold= [0  ]*self._bars
-        self._playing  = False
-        self._phase    = 0.0
-        t = QTimer(self); t.timeout.connect(self._animate); t.start(40)
+        self.setMinimumHeight(70)
+        self._bars=28; self._heights=[0.0]*28; self._targets=[0.0]*28
+        self._peaks=[0.0]*28; self._peak_hold=[0]*28
+        self._playing=False; self._phase=0.0
+        t=QTimer(self); t.timeout.connect(self._animate); t.start(40)
 
-    def set_playing(self, v): self._playing = v
-    if not True: _targets = [0.0]*32
+    def set_playing(self, v):
+        self._playing=v
+        if not v: self._targets=[0.0]*self._bars
 
     def _animate(self):
-        self._phase += 0.08
+        self._phase+=0.08
         if self._playing:
             for i in range(self._bars):
-                base  = 0.15 + 0.6*math.exp(-0.04*i)
-                w1    = 0.25*math.sin(self._phase*1.7+i*0.4)
-                w2    = 0.15*math.sin(self._phase*3.1+i*0.7)
-                w3    = 0.10*math.sin(self._phase*5.3+i*1.1)
-                sp1   = 0.3 *math.exp(-0.5*((i-6)**2))
-                sp2   = 0.2 *math.exp(-0.5*((i-14)**2))
-                noise = random.gauss(0,0.08)
-                self._targets[i] = max(0.0,min(1.0,base+w1+w2+w3+sp1+sp2+noise))
-        else:
-            self._targets = [0.0]*self._bars
+                base=0.15+0.6*math.exp(-0.04*i)
+                w1=0.25*math.sin(self._phase*1.7+i*0.4)
+                w2=0.15*math.sin(self._phase*3.1+i*0.7)
+                sp1=0.3*math.exp(-0.5*((i-5)**2))
+                sp2=0.2*math.exp(-0.5*((i-13)**2))
+                noise=random.gauss(0,0.07)
+                self._targets[i]=max(0.0,min(1.0,base+w1+w2+sp1+sp2+noise))
         for i in range(self._bars):
-            d = self._targets[i]-self._heights[i]
-            self._heights[i] += d*0.35 if d>0 else d*0.12
-            self._heights[i] = max(0.0,min(1.0,self._heights[i]))
-            if self._heights[i] >= self._peaks[i]:
-                self._peaks[i]=self._heights[i]; self._peak_hold[i]=18
+            d=self._targets[i]-self._heights[i]
+            self._heights[i]+=d*0.35 if d>0 else d*0.12
+            self._heights[i]=max(0.0,min(1.0,self._heights[i]))
+            if self._heights[i]>=self._peaks[i]:
+                self._peaks[i]=self._heights[i]; self._peak_hold[i]=20
             else:
                 if self._peak_hold[i]>0: self._peak_hold[i]-=1
-                else: self._peaks[i]=max(0,self._peaks[i]-0.018)
+                else: self._peaks[i]=max(0,self._peaks[i]-0.015)
         self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w,h = self.width(),self.height()
-        p.fillRect(0,0,w,h,QColor("#0d0d0d"))
-        n=self._bars; gap=2; bar_w=max(3,(w-gap*(n+1))//n); total=bar_w+gap
-        for i in range(n):
-            x=gap+i*total; bh=int(self._heights[i]*(h-8))
-            if bh<1:
-                p.fillRect(x,h-2,bar_w,2,QColor("#1e1e1e")); continue
-            y=h-bh-2; ratio=self._heights[i]
-            if ratio<0.5: r=int(ratio*2*255);g=200;b=20
-            elif ratio<0.8: r=255;g=int((1-(ratio-0.5)/0.3)*180);b=10
-            else: r=255;g=int((1-(ratio-0.8)/0.2)*80);b=0
-            grad=QLinearGradient(x,y+bh,x,y)
-            grad.setColorAt(0,QColor(r,g,b,200))
-            grad.setColorAt(1,QColor(min(255,r+60),min(255,g+60),min(255,b+60),255))
-            p.fillRect(x,y,bar_w,bh,grad)
-            ref=QLinearGradient(x,h-1,x,h-int(bh*0.25))
-            ref.setColorAt(0,QColor(r,g,b,60)); ref.setColorAt(1,QColor(r,g,b,0))
-            p.fillRect(x,h-int(bh*0.25),bar_w,int(bh*0.25),ref)
-            py=int((1-self._peaks[i])*(h-8))
-            p.fillRect(x,py,bar_w,2,QColor(min(255,r+80),min(255,g+80),255,220))
-        p.end()
-
-
-# ══════════════════════════════════════════
-#  HEADER MARCA
-# ══════════════════════════════════════════
-class BrandHeader(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent); self.setFixedHeight(48)
-        self._phase=0.0
-        t=QTimer(self); t.timeout.connect(self._tick); t.start(50)
-
-    def _tick(self): self._phase+=0.05; self.update()
 
     def paintEvent(self, event):
         p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w,h=self.width(),self.height()
-        p.fillRect(0,0,w,h,QColor("#080808"))
-        for x in range(0,w,3):
-            t=x/w; wave=math.sin(t*12-self._phase*2)*3
-            alpha=int(80+60*math.sin(t*6-self._phase))
-            p.setPen(QPen(QColor(255,102,0,alpha),1))
-            p.drawPoint(x,int(h-4+wave))
-        p.setPen(QPen(QColor("#ff6600"),1)); p.drawLine(0,h-1,w,h-1)
-        f=QFont("Segoe UI",10); f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing,3)
-        p.setFont(f); p.setPen(QColor("#555")); p.drawText(14,16,"GRUP COMUNICADOS")
-        f2=QFont("Segoe UI",18,QFont.Weight.Bold); p.setFont(f2)
-        p.setPen(QColor(255,102,0,40)); p.drawText(15,40,"PoleCaster")
-        p.setPen(QColor("#ff6600")); p.drawText(14,39,"Pole")
-        p.setPen(QColor("#ffaa33"))
-        fm=p.fontMetrics(); off=fm.horizontalAdvance("Pole")
-        p.drawText(14+off,39,"Caster")
-        f3=QFont("Segoe UI",8); p.setFont(f3)
-        p.setPen(QColor("#444")); p.drawText(w-60,38,f"v{APP_VERSION}")
+        p.fillRect(0,0,w,h,QColor("#0a0a0a"))
+        n=self._bars; gap=2; bar_w=max(3,(w-gap*(n+1))//n); total=bar_w+gap
+        for i in range(n):
+            x=gap+i*total; bh=int(self._heights[i]*(h-6))
+            if bh<1: p.fillRect(x,h-2,bar_w,2,QColor("#1a1a1a")); continue
+            y=h-bh-2; ratio=self._heights[i]
+            if ratio<0.5: r=int(ratio*2*200);g=210;b=30
+            elif ratio<0.8: r=255;g=int((1-(ratio-0.5)/0.3)*160);b=10
+            else: r=255;g=int((1-(ratio-0.8)/0.2)*60);b=0
+            grad=QLinearGradient(x,y+bh,x,y)
+            grad.setColorAt(0,QColor(r,g,b,180)); grad.setColorAt(1,QColor(min(255,r+50),min(255,g+50),min(255,b+30),255))
+            p.fillRect(x,y,bar_w,bh,grad)
+            py=int((1-self._peaks[i])*(h-6))
+            p.fillRect(x,py,bar_w,2,QColor(255,200,100,200))
         p.end()
 
 
 # ══════════════════════════════════════════
-#  MODELOS
+#  MODELOS DE DATOS
 # ══════════════════════════════════════════
 class PlaylistItem:
-    TYPE_MUSIC="Música"; TYPE_JINGLE="Jingle"; TYPE_SPOT="Spot"
-    def __init__(self,path,title="",artist="",duration=0,item_type=None):
+    TYPE_MUSIC="Música"; TYPE_JINGLE="Cuña"; TYPE_SPOT="Spot"
+    TYPE_STOP="Stop"; TYPE_STREAM="Radio Internet"; TYPE_PAUSE="Pausa"
+
+    def __init__(self, path, title="", artist="", duration=0, item_type=None, stream_url=""):
         self.path=path; self.title=title or os.path.splitext(os.path.basename(path))[0]
-        self.artist=artist; self.duration=duration; self.item_type=item_type or self.TYPE_MUSIC
+        self.artist=artist; self.duration=duration
+        self.item_type=item_type or self.TYPE_MUSIC; self.stream_url=stream_url
+
     def duration_str(self):
         if self.duration<=0: return "--:--"
         m,s=divmod(int(self.duration),60); return f"{m:02d}:{s:02d}"
-    def to_dict(self): return {"path":self.path,"title":self.title,"artist":self.artist,"duration":self.duration,"type":self.item_type}
+
+    def to_dict(self):
+        return {"path":self.path,"title":self.title,"artist":self.artist,
+                "duration":self.duration,"type":self.item_type,"stream_url":self.stream_url}
+
     @classmethod
-    def from_dict(cls,d): return cls(d["path"],d.get("title",""),d.get("artist",""),d.get("duration",0),d.get("type",cls.TYPE_MUSIC))
+    def from_dict(cls,d):
+        return cls(d["path"],d.get("title",""),d.get("artist",""),
+                   d.get("duration",0),d.get("type",cls.TYPE_MUSIC),d.get("stream_url",""))
 
 
 class SchedulerEvent:
-    TYPES = ["Jingle","Spot","Playlist","Silencio","Archivo"]
-    def __init__(self, time_str, action, file_path="", repeat=False,
-                 days=None, event_type="Archivo", interrupt=True):
-        self.time_str   = time_str
-        self.action     = action
-        self.file_path  = file_path
-        self.repeat     = repeat
-        self.days       = days if days is not None else [True]*7  # Lun-Dom
-        self.event_type = event_type
-        self.interrupt  = interrupt   # interrumpir canción actual
-        self.executed_today = False
+    TYPES=["Cuña","Spot","Playlist","Silencio","Archivo","Locución hora"]
+    def __init__(self,time_str,action,file_path="",repeat=False,days=None,event_type="Archivo",interrupt=True):
+        self.time_str=time_str; self.action=action; self.file_path=file_path
+        self.repeat=repeat; self.days=days if days is not None else [True]*7
+        self.event_type=event_type; self.interrupt=interrupt; self.executed_today=False
 
-    def runs_today(self):
-        dow = datetime.now().weekday()  # 0=Lun, 6=Dom
-        return self.days[dow]
+    def runs_today(self): return self.days[datetime.now().weekday()]
 
     def to_dict(self):
         return {"time":self.time_str,"action":self.action,"file":self.file_path,
-                "repeat":self.repeat,"days":self.days,"type":self.event_type,
-                "interrupt":self.interrupt}
+                "repeat":self.repeat,"days":self.days,"type":self.event_type,"interrupt":self.interrupt}
+
     @classmethod
     def from_dict(cls,d):
         return cls(d["time"],d["action"],d.get("file",""),d.get("repeat",False),
@@ -231,28 +256,27 @@ class SchedulerEvent:
 #  MOTOR AUDIO
 # ══════════════════════════════════════════
 class AudioEngine(QThread):
-    songFinished   = pyqtSignal()
-    positionUpdate = pyqtSignal(float,float)
-
+    songFinished=pyqtSignal(); positionUpdate=pyqtSignal(float,float)
     def __init__(self):
         super().__init__()
-        self._player=None; self._vlc=None; self._volume=85; self._playing=False
-        self._init_vlc()
+        self._player=None; self._vlc=None; self._volume=85
+        self._monitor_volume=85  # volumen local (auriculares/monitores)
+        self._playing=False; self._init_vlc()
 
     def _init_vlc(self):
         try:
             import vlc
             self._vlc=vlc.Instance("--no-xlib"); self._player=self._vlc.media_player_new()
             em=self._player.event_manager()
-            em.event_attach(vlc.EventType.MediaPlayerEndReached, lambda e: self.songFinished.emit())
+            em.event_attach(vlc.EventType.MediaPlayerEndReached,lambda e:self.songFinished.emit())
         except Exception as ex: print(f"VLC: {ex}")
 
     def play(self,path):
-        if not os.path.exists(path): return False
+        if not os.path.exists(path) and not path.startswith("http"): return False
         try:
             import vlc
             media=self._vlc.media_new(path); self._player.set_media(media)
-            self._player.play(); self._player.audio_set_volume(self._volume)
+            self._player.play(); self._player.audio_set_volume(self._monitor_volume)
             self._playing=True
             threading.Thread(target=self._pos_loop,daemon=True).start()
             return True
@@ -265,15 +289,16 @@ class AudioEngine(QThread):
         if self._player: self._player.stop()
         self._playing=False
 
-    def set_volume(self,v):
-        self._volume=v
+    def set_monitor_volume(self,v):
+        """Volumen local (auriculares) — NO afecta el streaming"""
+        self._monitor_volume=v
         if self._player:
             try: self._player.audio_set_volume(v)
             except: pass
 
     def get_position(self):
         if self._player:
-            try: return self._player.get_time()/1000.0, self._player.get_length()/1000.0
+            try: return self._player.get_time()/1000.0,self._player.get_length()/1000.0
             except: pass
         return 0,0
 
@@ -285,49 +310,47 @@ class AudioEngine(QThread):
 
 
 # ══════════════════════════════════════════
-#  MOTOR STREAMING
+#  MOTOR STREAMING (FFmpeg)
 # ══════════════════════════════════════════
 class StreamEngine(QThread):
-    statusChanged   = pyqtSignal(bool,str)
-    listenersUpdate = pyqtSignal(int)
+    statusChanged=pyqtSignal(bool,str); listenersUpdate=pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
         self._process=None; self._connected=False; self._cfg={}
+        self._stream_volume=100  # volumen de salida al streaming (independiente del monitor)
         self._mon=QTimer(); self._mon.timeout.connect(self._poll)
 
     def configure(self,cfg): self._cfg=cfg
+
+    def set_stream_volume(self,v):
+        """Volumen del streaming — independiente del volumen de monitores"""
+        self._stream_volume=v
 
     def test_connection(self):
         c=self._cfg
         if not c: return False,"Sin configuración"
         try:
             url=f"http://{c['host']}:{c['port']}/"
-            r=requests.get(url,timeout=4)
-            return True, f"Servidor accesible ({r.status_code})"
-        except requests.ConnectionError:
-            return False,"No se pudo conectar al servidor"
-        except Exception as ex:
-            return False, str(ex)
+            r=requests.get(url,timeout=4); return True,f"Servidor OK ({r.status_code})"
+        except requests.ConnectionError: return False,"No se pudo conectar"
+        except Exception as ex: return False,str(ex)
 
     def connect_stream(self):
         c=self._cfg
         if not c: return False
         stype=c.get("type","icecast2")
-        if "shoutcast_v1" in stype:
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/"
-        elif "shoutcast_v2" in stype:
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/{c.get('sid','1')}"
-        else:
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}{c.get('mountpoint','/stream')}"
-        br=c.get("bitrate",128)
-        fmt=c.get("format","mp3").lower()
+        if "shoutcast_v1" in stype: url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/"
+        elif "shoutcast_v2" in stype: url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/{c.get('sid','1')}"
+        else: url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}{c.get('mountpoint','/stream')}"
+        br=c.get("bitrate",128); fmt=c.get("format","mp3").lower()
         codec="libmp3lame" if fmt=="mp3" else ("libfdk_aac" if fmt=="aac" else "libvorbis")
         ofmt="mp3" if fmt=="mp3" else ("adts" if fmt=="aac" else "ogg")
+        vol_filter=f"volume={self._stream_volume/100.0:.2f}"
         if sys.platform=="win32": asrc=["-f","dshow","-i","audio=Mezcla estéreo"]
         elif sys.platform=="darwin": asrc=["-f","avfoundation","-i",":0"]
         else: asrc=["-f","pulse","-i","default"]
-        cmd=(["ffmpeg","-re"]+asrc+["-acodec",codec,"-ab",f"{br}k","-ar","44100","-f",ofmt,url,"-y"])
+        cmd=(["ffmpeg","-re"]+asrc+["-af",vol_filter,"-acodec",codec,"-ab",f"{br}k","-ar","44100","-f",ofmt,url,"-y"])
         try:
             self._process=subprocess.Popen(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             self._connected=True
@@ -347,9 +370,8 @@ class StreamEngine(QThread):
         c=self._cfg
         if not c: return
         try:
-            url=f"http://{c['host']}:{c['port']}/status-json.xsl"
-            r=requests.get(url,timeout=3); data=r.json()
-            sources=data.get("icestats",{}).get("source",[])
+            r=requests.get(f"http://{c['host']}:{c['port']}/status-json.xsl",timeout=3)
+            sources=r.json().get("icestats",{}).get("source",[])
             if isinstance(sources,dict): sources=[sources]
             for s in sources:
                 if c.get("mountpoint","") in str(s.get("listenurl","")):
@@ -358,494 +380,712 @@ class StreamEngine(QThread):
 
 
 # ══════════════════════════════════════════
+#  DIÁLOGO STREAMING (estilo RadioBOSS)
+# ══════════════════════════════════════════
+class StreamingDialog(QDialog):
+    def __init__(self, parent=None, cfg=None):
+        super().__init__(parent); self.setWindowTitle("Configuración de Streaming")
+        self.setFixedSize(480,360); self.cfg=cfg or {}
+        self.setStyleSheet(parent.styleSheet() if parent else "")
+        lay=QVBoxLayout(self)
+        tabs=QTabWidget()
+
+        # ── Pestaña Conexión
+        conn=QWidget(); cl=QGridLayout(conn); cl.setSpacing(8); cl.setContentsMargins(12,12,12,12)
+        cl.addWidget(QLabel("Servidor:"),0,0)
+        self.edit_server=QLineEdit(cfg.get("host","localhost")); cl.addWidget(self.edit_server,0,1,1,2)
+        cl.addWidget(QLabel("Contraseña:"),1,0)
+        self.edit_pass=QLineEdit(cfg.get("password","")); self.edit_pass.setEchoMode(QLineEdit.EchoMode.Password)
+        cl.addWidget(self.edit_pass,1,1)
+        self.chk_public=QCheckBox("Pública (carpeta)"); cl.addWidget(self.chk_public,1,2)
+        cl.addWidget(QLabel("Puerto:"),2,0)
+        self.edit_port=QLineEdit(cfg.get("port","8000")); cl.addWidget(self.edit_port,2,1)
+        self.edit_name=QLineEdit(cfg.get("name","")); self.edit_name.setPlaceholderText("Nombre para mostrar (opcional)")
+        cl.addWidget(QLabel("Nombre:"),3,0); cl.addWidget(self.edit_name,3,1,1,2)
+        cl.addWidget(QLabel("Montaje:"),4,0)
+        self.edit_mount=QLineEdit(cfg.get("mountpoint","/stream")); cl.addWidget(self.edit_mount,4,1)
+        self.spin_reconnect=QSpinBox(); self.spin_reconnect.setRange(0,300); self.spin_reconnect.setSuffix(" s")
+        self.spin_reconnect.setValue(cfg.get("reconnect",5))
+        cl.addWidget(QLabel("Auto reconectar:"),4,2); cl.addWidget(self.spin_reconnect,4,3) if cl.columnCount()>3 else None
+
+        # Tipo servidor
+        cl.addWidget(QLabel("Tipo:"),5,0)
+        self.combo_type=QComboBox(); self.combo_type.addItems(["Icecast2","Shoutcast v1","Shoutcast v2"])
+        t=cfg.get("type","icecast2")
+        if "v1" in t: self.combo_type.setCurrentIndex(1)
+        elif "v2" in t: self.combo_type.setCurrentIndex(2)
+        cl.addWidget(self.combo_type,5,1)
+
+        # Calidad
+        sep=QFrame(); sep.setFrameShape(QFrame.Shape.HLine); cl.addWidget(sep,6,0,1,3)
+        cl.addWidget(QLabel("Frecuencia:"),7,0)
+        self.combo_freq=QComboBox(); self.combo_freq.addItems(["44100","48000","22050"])
+        cl.addWidget(self.combo_freq,7,1)
+        cl.addWidget(QLabel("Codificador:"),8,0)
+        self.combo_codec=QComboBox(); self.combo_codec.addItems(["MP3","AAC","OGG"])
+        cl.addWidget(self.combo_codec,8,1)
+        cl.addWidget(QLabel("Bitrate (kbps):"),9,0)
+        self.combo_br=QComboBox(); self.combo_br.addItems(["64","96","128","192","320"])
+        self.combo_br.setCurrentText(str(cfg.get("bitrate",128))); cl.addWidget(self.combo_br,9,1)
+        cl.addWidget(QLabel("Canales:"),10,0)
+        self.combo_ch=QComboBox(); self.combo_ch.addItems(["stereo","mono"])
+        cl.addWidget(self.combo_ch,10,1)
+        tabs.addTab(conn,"Conexión")
+
+        # ── Pestaña Info estación
+        info=QWidget(); il=QGridLayout(info); il.setSpacing(8); il.setContentsMargins(12,12,12,12)
+        for ri,(lbl,attr,val) in enumerate([("Nombre radio:","edit_rname",cfg.get("radio_name","Mi Radio")),
+                                             ("Descripción:", "edit_rdesc",cfg.get("radio_desc","")),
+                                             ("Género:",      "edit_rgenre",cfg.get("radio_genre","")),
+                                             ("URL:",         "edit_rurl",  cfg.get("radio_url",""))]):
+            il.addWidget(QLabel(lbl),ri,0); e=QLineEdit(val); setattr(self,attr,e); il.addWidget(e,ri,1)
+        tabs.addTab(info,"Información de la estación")
+
+        # ── Pestaña Metadatos
+        meta=QWidget(); ml=QVBoxLayout(meta); ml.setContentsMargins(12,12,12,12)
+        self.chk_send_meta=QCheckBox("Enviar metadatos (artista/título) al servidor"); self.chk_send_meta.setChecked(True)
+        self.chk_utf8=QCheckBox("Codificación UTF-8"); self.chk_utf8.setChecked(True)
+        ml.addWidget(self.chk_send_meta); ml.addWidget(self.chk_utf8); ml.addStretch()
+        tabs.addTab(meta,"Metadatos")
+
+        # ── Pestaña Estadística
+        stat=QWidget(); sl=QVBoxLayout(stat); sl.setContentsMargins(12,12,12,12)
+        self.lbl_stat=QLabel("Conecta el streaming para ver estadísticas."); self.lbl_stat.setStyleSheet("color:#888;")
+        sl.addWidget(self.lbl_stat); sl.addStretch()
+        tabs.addTab(stat,"Estadística")
+
+        lay.addWidget(tabs)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Aceptar")
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        lay.addWidget(bb)
+
+    def get_config(self):
+        stype=["icecast2","shoutcast_v1","shoutcast_v2"][self.combo_type.currentIndex()]
+        return {"host":self.edit_server.text(),"port":self.edit_port.text(),
+                "password":self.edit_pass.text(),"mountpoint":self.edit_mount.text(),
+                "type":stype,"bitrate":int(self.combo_br.currentText()),
+                "format":self.combo_codec.currentText().lower(),
+                "radio_name":self.edit_rname.text(),"radio_desc":self.edit_rdesc.text(),
+                "radio_genre":self.edit_rgenre.text(),"radio_url":self.edit_rurl.text(),
+                "reconnect":self.spin_reconnect.value(),"name":self.edit_name.text()}
+
+
+# ══════════════════════════════════════════
+#  DIÁLOGO RADIO INTERNET
+# ══════════════════════════════════════════
+class InternetRadioDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent); self.setWindowTitle("Añadir Radio de Internet")
+        self.setFixedSize(420,200); self.setStyleSheet(parent.styleSheet() if parent else "")
+        lay=QVBoxLayout(self); lay.setSpacing(8); lay.setContentsMargins(14,14,14,14)
+        lay.addWidget(QLabel("URL del stream (Icecast/Shoutcast):"))
+        self.edit_url=QLineEdit(); self.edit_url.setPlaceholderText("http://radio.servidor.com:8000/stream")
+        lay.addWidget(self.edit_url)
+        lay.addWidget(QLabel("Nombre de la radio:"))
+        self.edit_name=QLineEdit(); self.edit_name.setPlaceholderText("Mi Radio Online")
+        lay.addWidget(self.edit_name)
+        lay.addWidget(QLabel("Género (opcional):"))
+        self.edit_genre=QLineEdit(); lay.addWidget(self.edit_genre)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Añadir")
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        lay.addWidget(bb)
+
+    def get_item(self):
+        url=self.edit_url.text().strip(); name=self.edit_name.text().strip() or url
+        return PlaylistItem(url,name,"",0,PlaylistItem.TYPE_STREAM,url) if url else None
+
+
+# ══════════════════════════════════════════
 #  VENTANA PRINCIPAL
 # ══════════════════════════════════════════
 class PoleCasterWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"PoleCaster v{APP_VERSION} — {APP_BRAND}")
-        self.setMinimumSize(1120,700); self.resize(1300,760)
+        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} — {APP_BRAND}")
+        self.setMinimumSize(1200,720); self.resize(1400,800)
         self.playlist=[]; self.current_index=-1; self.is_playing=False
-        self.jingles=[""]*9; self.scheduler_events=[]; self._peak_listeners=0
+        self.jingles=[""]*9; self.jingle_names=["Cuña "+str(i+1) for i in range(9)]
+        self.scheduler_events=[]; self._peak_listeners=0
+        self._stream_cfg={}; self._theme="dark"
+        self._repeat_track=False; self._repeat_list=False
+        self._stop_after=False; self._random=False
         self.audio_engine=AudioEngine(); self.stream_engine=StreamEngine()
         self._build_ui(); self._connect_signals(); self._load_config()
         self._clock_timer=QTimer(); self._clock_timer.timeout.connect(self._update_clock); self._clock_timer.start(1000)
         self._sched_timer=QTimer(); self._sched_timer.timeout.connect(self._check_scheduler); self._sched_timer.start(10000)
-        self._countdown_timer=QTimer(); self._countdown_timer.timeout.connect(self._update_countdown); self._countdown_timer.start(5000)
-        self._update_clock()
+        self._cd_timer=QTimer(); self._cd_timer.timeout.connect(self._update_countdown); self._cd_timer.start(5000)
+        self._update_clock(); self.apply_theme("dark")
 
+    # ══════════════════════════════════════
+    #  BUILD UI
+    # ══════════════════════════════════════
     def _build_ui(self):
         central=QWidget(); self.setCentralWidget(central)
         root=QVBoxLayout(central); root.setContentsMargins(0,0,0,0); root.setSpacing(0)
         self._build_menubar()
-        root.addWidget(BrandHeader())
-        root.addWidget(self._build_toolbar())
-        root.addWidget(self._build_top_panels())
-        root.addWidget(self._build_equalizer_section())
-        sep=QFrame(); sep.setObjectName("hSep"); sep.setFrameShape(QFrame.Shape.HLine); sep.setFixedHeight(1)
-        root.addWidget(sep)
-        spl=QSplitter(Qt.Orientation.Horizontal)
-        spl.addWidget(self._build_left_panel())
-        spl.addWidget(self._build_right_panel())
-        spl.setSizes([780,360])
-        root.addWidget(spl,1)
-        root.addWidget(self._build_status_bar())
+        root.addWidget(self._build_header())
+        root.addWidget(self._build_top_info())
+        root.addWidget(self._build_main_area(), 1)
+        self._build_statusbar()
 
-    def _build_menubar(self):
-        mb=self.menuBar()
-        mb.setStyleSheet("QMenuBar{background:#050505;color:#888;border-bottom:1px solid #1a1a1a;padding:2px 4px;}"
-                         "QMenuBar::item:selected{background:#1a1a1a;color:#ff6600;}"
-                         "QMenu{background:#111;border:1px solid #2a2a2a;}"
-                         "QMenu::item{padding:6px 20px;color:#bbb;}"
-                         "QMenu::item:selected{background:#1e1e1e;color:#ff6600;}"
-                         "QMenu::separator{height:1px;background:#2a2a2a;margin:3px 0;}")
-        fm=mb.addMenu("Archivo")
-        fm.addAction("Nueva playlist",self._new_playlist)
-        fm.addAction("Abrir playlist",self._open_playlist)
-        fm.addAction("Guardar playlist",self._save_playlist)
-        fm.addSeparator(); fm.addAction("Salir",self.close)
-        mb.addMenu("Editar"); mb.addMenu("Streaming"); mb.addMenu("Herramientas")
-        hm=mb.addMenu("Ayuda")
-        hm.addAction(f"Acerca de {APP_NAME}",lambda:QMessageBox.about(self,APP_NAME,
-            f"<b>{APP_NAME} v{APP_VERSION}</b><br><i>{APP_BRAND}</i><br><br>"
-            "Automatizador de Radio con Icecast2 + Shoutcast v1/v2"))
+    # ── HEADER ────────────────────────────
+    def _build_header(self):
+        hdr=QWidget(); hdr.setFixedHeight(44)
+        hdr.setObjectName("header")
+        hdr.setStyleSheet("#header{background:#080808;border-bottom:1px solid #1a1a1a;}")
+        lay=QHBoxLayout(hdr); lay.setContentsMargins(10,4,10,4); lay.setSpacing(10)
 
-    def _build_toolbar(self):
-        bar=QWidget(); bar.setFixedHeight(32); bar.setStyleSheet("background:#0a0a0a;border-bottom:1px solid #1a1a1a;")
-        lay=QHBoxLayout(bar); lay.setContentsMargins(8,2,8,2); lay.setSpacing(4)
-        for lbl,slot in [("+ Agregar",self._add_files),("Abrir PL",self._open_playlist),("Guardar PL",self._save_playlist)]:
-            b=QPushButton(lbl); b.setFixedHeight(24); b.clicked.connect(slot); lay.addWidget(b)
-        s=QFrame(); s.setObjectName("vSep"); s.setFrameShape(QFrame.Shape.VLine); s.setFixedWidth(1); lay.addWidget(s)
-        for lbl in ["Normalizar","Crossfade","Explorador"]:
-            b=QPushButton(lbl); b.setFixedHeight(24); lay.addWidget(b)
+        # Logo
+        logo_lbl=QLabel()
+        logo_path=os.path.join(os.path.dirname(__file__),"assets","logo.png")
+        if os.path.exists(logo_path):
+            pix=QPixmap(logo_path).scaled(36,36,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(pix)
+        else:
+            logo_lbl.setText("🎙")
+            logo_lbl.setStyleSheet("font-size:24px;")
+        lay.addWidget(logo_lbl)
+
+        # Marca
+        brand_lay=QVBoxLayout(); brand_lay.setSpacing(0)
+        lbl_gc=QLabel("GRUP COMUNICADOS"); lbl_gc.setStyleSheet("color:#555;font-size:9px;letter-spacing:2px;")
+        lbl_app=QLabel("PoleCaster"); lbl_app.setStyleSheet("color:#ff6600;font-size:18px;font-weight:bold;")
+        brand_lay.addWidget(lbl_gc); brand_lay.addWidget(lbl_app)
+        lay.addLayout(brand_lay)
         lay.addStretch()
-        self.lbl_date=QLabel(); self.lbl_date.setStyleSheet("color:#444;font-size:11px;")
-        self.lbl_clock=QLabel("--:--:--"); self.lbl_clock.setStyleSheet("color:#ff6600;font-family:'Courier New';font-size:13px;font-weight:bold;")
-        lay.addWidget(self.lbl_date); lay.addWidget(self.lbl_clock)
-        return bar
 
-    def _build_top_panels(self):
-        top=QWidget(); top.setFixedHeight(138); top.setStyleSheet("background:#0d0d0d;")
+        # Tema claro/oscuro
+        self.btn_theme=QPushButton("☀ Tema claro"); self.btn_theme.setFixedHeight(26)
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        lay.addWidget(self.btn_theme)
+
+        # Versión
+        lbl_ver=QLabel(f"v{APP_VERSION}"); lbl_ver.setStyleSheet("color:#333;font-size:10px;")
+        lay.addWidget(lbl_ver)
+        return hdr
+
+    # ── TOP INFO (3 columnas) ─────────────
+    def _build_top_info(self):
+        top=QWidget(); top.setFixedHeight(60)
+        top.setStyleSheet("background:#080808;border-bottom:1px solid #1a1a1a;")
         lay=QHBoxLayout(top); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
-        lay.addWidget(self._panel_now_playing(),1); lay.addWidget(self._vsep())
-        lay.addWidget(self._panel_next(),1); lay.addWidget(self._vsep())
-        lay.addWidget(self._panel_stream_status(),1)
+
+        # Col 1: En el aire
+        col1=QWidget(); c1l=QHBoxLayout(col1); c1l.setContentsMargins(12,6,12,6); c1l.setSpacing(8)
+        self.lbl_onair=QLabel("● ON AIR")
+        self.lbl_onair.setStyleSheet("color:#fff;background:#cc2200;font-weight:bold;font-size:10px;padding:2px 8px;border-radius:3px;")
+        c1l.addWidget(self.lbl_onair)
+        inf=QVBoxLayout(); inf.setSpacing(1)
+        self.lbl_now_title=QLabel("Esperando..."); self.lbl_now_title.setStyleSheet("color:#fff;font-size:13px;font-weight:bold;")
+        self.lbl_now_artist=QLabel(""); self.lbl_now_artist.setStyleSheet("color:#ff6600;font-size:11px;")
+        inf.addWidget(self.lbl_now_title); inf.addWidget(self.lbl_now_artist)
+        c1l.addLayout(inf); c1l.addStretch()
+        lay.addWidget(col1,2)
+
+        lay.addWidget(self._vsep())
+
+        # Col 2: Siguiente
+        col2=QWidget(); c2l=QVBoxLayout(col2); c2l.setContentsMargins(12,6,12,6); c2l.setSpacing(1)
+        lbl_sig=QLabel("SIGUIENTE"); lbl_sig.setStyleSheet("color:#444;font-size:9px;letter-spacing:1px;")
+        self.lbl_next_title=QLabel("—"); self.lbl_next_title.setStyleSheet("color:#ccc;font-size:12px;font-weight:bold;")
+        self.lbl_next_dur=QLabel(""); self.lbl_next_dur.setStyleSheet("color:#666;font-size:10px;")
+        c2l.addWidget(lbl_sig); c2l.addWidget(self.lbl_next_title); c2l.addWidget(self.lbl_next_dur)
+        lay.addWidget(col2,2)
+
+        lay.addWidget(self._vsep())
+
+        # Col 3: Radio name + reloj digital
+        col3=QWidget(); c3l=QVBoxLayout(col3); c3l.setContentsMargins(12,4,12,4); c3l.setSpacing(0)
+        self.lbl_radio_name=QLabel("Mi Radio Online"); self.lbl_radio_name.setStyleSheet("color:#ff6600;font-size:11px;font-weight:bold;")
+        self.lbl_clock=QLabel("--:--:--"); self.lbl_clock.setStyleSheet("color:#fff;font-family:'Courier New';font-size:20px;font-weight:bold;letter-spacing:2px;")
+        self.lbl_date=QLabel(""); self.lbl_date.setStyleSheet("color:#555;font-size:10px;")
+        c3l.addWidget(self.lbl_radio_name); c3l.addWidget(self.lbl_clock); c3l.addWidget(self.lbl_date)
+        lay.addWidget(col3,1)
         return top
+
+    # ── ÁREA PRINCIPAL ────────────────────
+    def _build_main_area(self):
+        spl=QSplitter(Qt.Orientation.Horizontal)
+
+        # PANEL IZQUIERDO
+        left=QWidget(); ll=QVBoxLayout(left); ll.setContentsMargins(0,0,0,0); ll.setSpacing(0)
+
+        # Ecualizador
+        eq_container=QWidget(); eq_container.setFixedHeight(80)
+        eq_container.setStyleSheet("background:#0a0a0a;border-bottom:1px solid #1a1a1a;")
+        eql=QHBoxLayout(eq_container); eql.setContentsMargins(8,4,8,4); eql.setSpacing(8)
+        eq_info=QVBoxLayout(); eq_info.setSpacing(2)
+        lbl_eq=QLabel("ECUALIZADOR"); lbl_eq.setStyleSheet("color:#333;font-size:9px;letter-spacing:2px;")
+        self.lbl_eq_status=QLabel("SILENCIO"); self.lbl_eq_status.setStyleSheet("color:#444;font-size:10px;font-weight:bold;")
+        tr=QHBoxLayout(); tr.setSpacing(6)
+        lbl_rem=QLabel("Restante"); lbl_rem.setStyleSheet("color:#444;font-size:9px;")
+        self.lbl_remaining=QLabel("--:--"); self.lbl_remaining.setStyleSheet("color:#fff;font-family:'Courier New';font-size:14px;font-weight:bold;")
+        tr.addWidget(lbl_rem); tr.addWidget(self.lbl_remaining)
+        eq_info.addWidget(lbl_eq); eq_info.addWidget(self.lbl_eq_status); eq_info.addLayout(tr)
+        eql.addLayout(eq_info)
+        self.eq_widget=EqualizerWidget(); eql.addWidget(self.eq_widget,1)
+        ll.addWidget(eq_container)
+
+        # Barra de progreso
+        self.progress_bar=QProgressBar(); self.progress_bar.setMaximum(1000)
+        self.progress_bar.setValue(0); self.progress_bar.setTextVisible(False); self.progress_bar.setFixedHeight(4)
+        ll.addWidget(self.progress_bar)
+
+        # Panel tabs izquierdo
+        left_tabs=QTabWidget()
+        left_tabs.addTab(self._tab_events(),"Eventos")
+        left_tabs.addTab(self._tab_upcoming(),"Próximos eventos")
+        left_tabs.addTab(self._tab_explorer(),"Explorador")
+        ll.addWidget(left_tabs,1)
+
+        # Controles Mic + Silencio
+        ll.addWidget(self._build_mic_controls())
+        spl.addWidget(left)
+
+        # PANEL DERECHO
+        right=QWidget(); rl=QVBoxLayout(right); rl.setContentsMargins(0,0,0,0); rl.setSpacing(0)
+        rl.addWidget(self._build_playlist_panel(),1)
+        rl.addWidget(self._build_transport())
+        spl.addWidget(right)
+
+        spl.setSizes([400,800])
+        return spl
+
+    # ── TAB EVENTOS (como ZaraRadio) ──────
+    def _tab_events(self):
+        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(4,4,4,4); lay.setSpacing(4)
+
+        # Botones de control de eventos
+        btn_row=QHBoxLayout(); btn_row.setSpacing(3)
+        self.btn_repro_event=QPushButton("▶ Reproducción de evento")
+        self.btn_repro_event.setCheckable(True)
+        self.btn_discard=QPushButton("✕ Descartar evento")
+        self.btn_activate=QPushButton("✓ Activar evento")
+        self.btn_activate.setCheckable(True); self.btn_activate.setChecked(True)
+        self.btn_plan=QPushButton("📅 Planificar evento")
+        for b in [self.btn_repro_event,self.btn_discard,self.btn_activate,self.btn_plan]:
+            b.setFixedHeight(26); btn_row.addWidget(b)
+        lay.addLayout(btn_row)
+
+        # Botón agregar evento
+        add_row=QHBoxLayout()
+        btn_add_ev=QPushButton("+ Nuevo evento programado"); btn_add_ev.setFixedHeight(26)
+        btn_add_ev.clicked.connect(self._add_event)
+        add_row.addWidget(btn_add_ev); add_row.addStretch()
+        self.lbl_next_event_bar=QLabel("Próximo: —"); self.lbl_next_event_bar.setStyleSheet("color:#ff6600;font-size:11px;")
+        add_row.addWidget(self.lbl_next_event_bar)
+        lay.addLayout(add_row)
+        return w
+
+    # ── TAB PRÓXIMOS EVENTOS (ZaraRadio) ──
+    def _tab_upcoming(self):
+        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        self.events_table=QTableWidget(0,5)
+        self.events_table.setHorizontalHeaderLabels(["Hora","Tipo","Fichero","Duración","Días"])
+        self.events_table.horizontalHeader().setSectionResizeMode(2,QHeaderView.ResizeMode.Stretch)
+        self.events_table.setColumnWidth(0,55); self.events_table.setColumnWidth(1,65)
+        self.events_table.setColumnWidth(3,60); self.events_table.setColumnWidth(4,100)
+        self.events_table.verticalHeader().setVisible(False)
+        self.events_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.events_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.events_table.setAlternatingRowColors(True)
+        lay.addWidget(self.events_table)
+
+        btn_bar=QWidget(); bl=QHBoxLayout(btn_bar); bl.setContentsMargins(4,4,4,4); bl.setSpacing(4)
+        for txt,slot in [("+ Añadir",self._add_event),("✕ Eliminar",self._delete_event),("Limpiar",self._clear_events)]:
+            b=QPushButton(txt); b.setFixedHeight(22); b.clicked.connect(slot); bl.addWidget(b)
+        bl.addStretch()
+        self.lbl_countdown=QLabel(""); self.lbl_countdown.setStyleSheet("color:#ff6600;font-size:10px;"); bl.addWidget(self.lbl_countdown)
+        lay.addWidget(btn_bar)
+        return w
+
+    # ── TAB EXPLORADOR ────────────────────
+    def _tab_explorer(self):
+        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(4,4,4,4); lay.setSpacing(4)
+        hint=QLabel("Doble clic en una carpeta para añadir todos los archivos de audio a la playlist")
+        hint.setStyleSheet("color:#555;font-size:10px;"); hint.setWordWrap(True); lay.addWidget(hint)
+        self.file_tree=QTreeWidget()
+        self.file_tree.setHeaderLabels(["Nombre","Tamaño"])
+        self.file_tree.setColumnWidth(0,220); self.file_tree.setAlternatingRowColors(True)
+        self.file_tree.itemDoubleClicked.connect(self._on_explorer_double_click)
+        self._populate_tree(self.file_tree)
+        lay.addWidget(self.file_tree,1)
+        btn_row=QHBoxLayout()
+        btn_ref=QPushButton("🔄 Actualizar"); btn_ref.setFixedHeight(22)
+        btn_ref.clicked.connect(lambda: self._populate_tree(self.file_tree))
+        btn_add_sel=QPushButton("+ Añadir selección"); btn_add_sel.setFixedHeight(22)
+        btn_add_sel.clicked.connect(self._add_from_explorer)
+        btn_row.addWidget(btn_ref); btn_row.addWidget(btn_add_sel); btn_row.addStretch()
+        lay.addLayout(btn_row)
+        return w
+
+    def _populate_tree(self, tree):
+        tree.clear()
+        roots=[os.path.expanduser("~"), "C:\\", "/"]
+        for root_path in roots:
+            if os.path.exists(root_path):
+                item=QTreeWidgetItem([os.path.basename(root_path) or root_path,""])
+                item.setData(0,Qt.ItemDataRole.UserRole,root_path)
+                tree.addTopLevelItem(item)
+                self._add_tree_children(item, root_path, depth=0)
+
+    def _add_tree_children(self, parent_item, path, depth=0):
+        if depth>2: return
+        try:
+            audio_exts={".mp3",".wav",".ogg",".flac",".aac",".m4a",".wma"}
+            entries=sorted(os.scandir(path), key=lambda e:(not e.is_dir(), e.name.lower()))
+            for entry in entries[:50]:
+                if entry.name.startswith("."): continue
+                if entry.is_dir():
+                    ch=QTreeWidgetItem([f"📁 {entry.name}",""])
+                    ch.setData(0,Qt.ItemDataRole.UserRole,entry.path)
+                    parent_item.addChild(ch)
+                    if depth<1: self._add_tree_children(ch,entry.path,depth+1)
+                elif os.path.splitext(entry.name)[1].lower() in audio_exts:
+                    size=f"{entry.stat().st_size//1024} KB"
+                    ch=QTreeWidgetItem([f"🎵 {entry.name}",size])
+                    ch.setData(0,Qt.ItemDataRole.UserRole,entry.path)
+                    parent_item.addChild(ch)
+        except: pass
+
+    def _on_explorer_double_click(self, item, col):
+        path=item.data(0,Qt.ItemDataRole.UserRole)
+        if not path: return
+        if os.path.isdir(path):
+            self._add_folder_path(path)
+        elif os.path.isfile(path):
+            self.playlist.append(PlaylistItem(path))
+            self._refresh_playlist()
+
+    def _add_from_explorer(self):
+        for item in self.file_tree.selectedItems():
+            path=item.data(0,Qt.ItemDataRole.UserRole)
+            if path and os.path.isfile(path):
+                self.playlist.append(PlaylistItem(path))
+        self._refresh_playlist()
+
+    # ── CONTROLES MIC ─────────────────────
+    def _build_mic_controls(self):
+        mic=QWidget(); mic.setFixedHeight(52); mic.setStyleSheet("background:#080808;border-top:1px solid #1a1a1a;")
+        lay=QHBoxLayout(mic); lay.setContentsMargins(8,4,8,4); lay.setSpacing(8)
+
+        # Botón MIC
+        self.btn_mic=QPushButton("🎙 MIC"); self.btn_mic.setObjectName("btnMic")
+        self.btn_mic.setCheckable(True); self.btn_mic.setFixedSize(60,40)
+        lay.addWidget(self.btn_mic)
+
+        sep=QFrame(); sep.setFrameShape(QFrame.Shape.VLine); sep.setObjectName("vSep"); lay.addWidget(sep)
+
+        # Volumen MONITOR (local — auriculares)
+        mon_lay=QVBoxLayout(); mon_lay.setSpacing(1)
+        lbl_mon=QLabel("Monitor (local)"); lbl_mon.setStyleSheet("color:#555;font-size:9px;")
+        mon_row=QHBoxLayout(); mon_row.setSpacing(4)
+        self.slider_monitor=QSlider(Qt.Orientation.Horizontal); self.slider_monitor.setRange(0,100)
+        self.slider_monitor.setValue(85); self.slider_monitor.setFixedWidth(100)
+        self.slider_monitor.valueChanged.connect(self._on_monitor_vol)
+        self.lbl_mon_val=QLabel("85%"); self.lbl_mon_val.setStyleSheet("color:#ff6600;font-size:10px;min-width:28px;")
+        mon_row.addWidget(self.slider_monitor); mon_row.addWidget(self.lbl_mon_val)
+        mon_lay.addWidget(lbl_mon); mon_lay.addLayout(mon_row); lay.addLayout(mon_lay)
+
+        sep2=QFrame(); sep2.setFrameShape(QFrame.Shape.VLine); sep2.setObjectName("vSep"); lay.addWidget(sep2)
+
+        # Volumen STREAMING (salida al servidor — independiente)
+        str_lay=QVBoxLayout(); str_lay.setSpacing(1)
+        lbl_str=QLabel("Streaming (emisión)"); lbl_str.setStyleSheet("color:#555;font-size:9px;")
+        str_row=QHBoxLayout(); str_row.setSpacing(4)
+        self.slider_stream_vol=QSlider(Qt.Orientation.Horizontal); self.slider_stream_vol.setRange(0,150)
+        self.slider_stream_vol.setValue(100); self.slider_stream_vol.setFixedWidth(100)
+        self.slider_stream_vol.valueChanged.connect(self._on_stream_vol)
+        self.lbl_str_val=QLabel("100%"); self.lbl_str_val.setStyleSheet("color:#00cc66;font-size:10px;min-width:28px;")
+        str_row.addWidget(self.slider_stream_vol); str_row.addWidget(self.lbl_str_val)
+        str_lay.addWidget(lbl_str); str_lay.addLayout(str_row); lay.addLayout(str_lay)
+
+        sep3=QFrame(); sep3.setFrameShape(QFrame.Shape.VLine); sep3.setObjectName("vSep"); lay.addWidget(sep3)
+
+        # Botón silencio
+        self.btn_silence=QPushButton("🔇 Silencio"); self.btn_silence.setFixedHeight(40)
+        self.btn_silence.setCheckable(True); self.btn_silence.clicked.connect(self._toggle_silence)
+        lay.addWidget(self.btn_silence)
+        lay.addStretch()
+        return mic
+
+    def _on_monitor_vol(self,v):
+        self.lbl_mon_val.setText(f"{v}%")
+        self.audio_engine.set_monitor_volume(v)
+
+    def _on_stream_vol(self,v):
+        self.lbl_str_val.setText(f"{v}%")
+        self.stream_engine.set_stream_volume(v)
+
+    def _toggle_silence(self, checked):
+        if checked:
+            self.audio_engine.set_monitor_volume(0)
+            self.btn_silence.setText("🔊 Restaurar")
+        else:
+            v=self.slider_monitor.value()
+            self.audio_engine.set_monitor_volume(v)
+            self.btn_silence.setText("🔇 Silencio")
+
+    # ── PLAYLIST PANEL ────────────────────
+    def _build_playlist_panel(self):
+        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        # Pestañas de playlist (como RadioBOSS)
+        pl_tabs=QTabWidget()
+        self.playlist_table=self._make_playlist_table()
+        pl_tabs.addTab(self._wrap_playlist(self.playlist_table,"main"),"Playlist 1")
+        self.playlist_table2=self._make_playlist_table()
+        pl_tabs.addTab(self._wrap_playlist(self.playlist_table2,"sec"),"Playlist 2")
+        btn_new=QPushButton("+"); btn_new.setFixedSize(28,28)
+        pl_tabs.setCornerWidget(btn_new)
+        lay.addWidget(pl_tabs,1)
+        return w
+
+    def _make_playlist_table(self):
+        t=QTableWidget(0,5)
+        t.setHorizontalHeaderLabels(["#","Título","Artista","Tipo","Dur."])
+        t.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
+        t.horizontalHeader().setSectionResizeMode(2,QHeaderView.ResizeMode.Stretch)
+        t.setColumnWidth(0,28); t.setColumnWidth(3,72); t.setColumnWidth(4,55)
+        t.verticalHeader().setVisible(False)
+        t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        t.setAlternatingRowColors(True)
+        t.doubleClicked.connect(lambda idx: self._play_index(idx.row()))
+        return t
+
+    def _wrap_playlist(self, table, key):
+        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        lay.addWidget(table)
+        btn_bar=QWidget(); bl=QHBoxLayout(btn_bar); bl.setContentsMargins(4,3,4,3); bl.setSpacing(3)
+        for txt,slot in [("+ Archivos",self._add_files),("+ Carpeta",self._add_folder),
+                         ("+ Radio Internet",self._add_internet_radio),
+                         ("✕",self._remove_selected),("↑",self._move_up),("↓",self._move_down),("Limpiar",self._clear_playlist)]:
+            b=QPushButton(txt); b.setFixedHeight(22); b.clicked.connect(slot); bl.addWidget(b)
+        bl.addStretch()
+        self.lbl_total=QLabel("0 pistas"); self.lbl_total.setStyleSheet("color:#555;font-size:10px;"); bl.addWidget(self.lbl_total)
+        lay.addWidget(btn_bar)
+        return w
+
+    # ── TRANSPORT ─────────────────────────
+    def _build_transport(self):
+        t=QWidget(); t.setFixedHeight(56); t.setStyleSheet("background:#060606;border-top:1px solid #1a1a1a;")
+        lay=QHBoxLayout(t); lay.setContentsMargins(8,6,8,6); lay.setSpacing(4)
+
+        def tb(label, tip="", check=False):
+            b=QPushButton(label); b.setFixedHeight(36); b.setToolTip(tip)
+            if check: b.setCheckable(True)
+            return b
+
+        self.btn_play=QPushButton("▶"); self.btn_play.setObjectName("btnPlay"); self.btn_play.setFixedSize(40,40); self.btn_play.clicked.connect(self._toggle_play)
+        self.btn_next=tb("⏭","Siguiente"); self.btn_next.setFixedWidth(36); self.btn_next.clicked.connect(self._skip_next)
+        self.btn_stop=QPushButton("⏹"); self.btn_stop.setObjectName("btnStop"); self.btn_stop.setFixedSize(40,40); self.btn_stop.clicked.connect(self._stop)
+        self.btn_prev=tb("⏮","Anterior"); self.btn_prev.setFixedWidth(36); self.btn_prev.clicked.connect(self._play_prev)
+
+        self.btn_rep_track=tb("🔂","Repetir pista",True); self.btn_rep_track.setFixedWidth(36)
+        self.btn_rep_track.clicked.connect(lambda c: setattr(self,'_repeat_track',c))
+        self.btn_stop_after=tb("⏹¹","Parar después de la pista actual",True); self.btn_stop_after.setFixedWidth(36)
+        self.btn_stop_after.clicked.connect(lambda c: setattr(self,'_stop_after',c))
+        self.btn_random=tb("🔀","Reproducción aleatoria",True); self.btn_random.setFixedWidth(36)
+        self.btn_random.clicked.connect(lambda c: setattr(self,'_random',c))
+        self.btn_rep_list=tb("🔁","Repetir lista",True); self.btn_rep_list.setFixedWidth(36)
+        self.btn_rep_list.clicked.connect(lambda c: setattr(self,'_repeat_list',c))
+
+        for b in [self.btn_prev,self.btn_stop,self.btn_play,self.btn_next]: lay.addWidget(b)
+        lay.addWidget(self._vsep_small())
+        for b in [self.btn_rep_track,self.btn_stop_after,self.btn_random,self.btn_rep_list]: lay.addWidget(b)
+        lay.addWidget(self._vsep_small())
+
+        # Posición
+        self.lbl_pos=QLabel("00:00 / 00:00"); self.lbl_pos.setStyleSheet("color:#555;font-family:'Courier New';font-size:11px;")
+        lay.addWidget(self.lbl_pos)
+        lay.addStretch()
+
+        # Stream status pequeño
+        self.lbl_stream_dot=QLabel("●"); self.lbl_stream_dot.setStyleSheet("color:#330000;font-size:14px;")
+        self.lbl_stream_mini=QLabel("Sin stream"); self.lbl_stream_mini.setStyleSheet("color:#555;font-size:10px;")
+        lay.addWidget(self.lbl_stream_dot); lay.addWidget(self.lbl_stream_mini)
+        return t
 
     def _vsep(self):
         f=QFrame(); f.setObjectName("vSep"); f.setFrameShape(QFrame.Shape.VLine); f.setFixedWidth(1); return f
 
-    def _panel_now_playing(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(14,8,14,8); lay.setSpacing(4)
-        lbl=QLabel("EN EL AIRE"); lbl.setStyleSheet("color:#444;font-size:9px;letter-spacing:2px;"); lay.addWidget(lbl)
-        row=QHBoxLayout()
-        self.lbl_onair=QLabel("● ON AIR"); self.lbl_onair.setStyleSheet("color:#fff;background:#cc3300;font-weight:bold;font-size:10px;padding:2px 8px;border-radius:3px;")
-        row.addWidget(self.lbl_onair); row.addStretch(); lay.addLayout(row)
-        self.lbl_now_title=QLabel("Esperando..."); self.lbl_now_title.setStyleSheet("color:#fff;font-size:14px;font-weight:bold;")
-        self.lbl_now_artist=QLabel(""); self.lbl_now_artist.setStyleSheet("color:#ff6600;font-size:12px;")
-        lay.addWidget(self.lbl_now_title); lay.addWidget(self.lbl_now_artist)
-        tr=QHBoxLayout()
-        for attr,lt in [("lbl_remaining","Restante"),("lbl_endtime","Fin a las")]:
-            box=QVBoxLayout(); l1=QLabel(lt); l1.setStyleSheet("color:#444;font-size:9px;")
-            l2=QLabel("--:--"); l2.setStyleSheet("color:#fff;font-family:'Courier New';font-size:16px;font-weight:bold;")
-            setattr(self,attr,l2); box.addWidget(l1); box.addWidget(l2); tr.addLayout(box)
-        lay.addLayout(tr); return w
+    def _vsep_small(self):
+        f=QFrame(); f.setObjectName("vSep"); f.setFrameShape(QFrame.Shape.VLine); f.setFixedWidth(1); f.setFixedHeight(24); return f
 
-    def _panel_next(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(14,8,14,8); lay.setSpacing(4)
-        lbl=QLabel("SIGUIENTE"); lbl.setStyleSheet("color:#444;font-size:9px;letter-spacing:2px;"); lay.addWidget(lbl)
-        self.lbl_next_title=QLabel("—"); self.lbl_next_title.setStyleSheet("color:#fff;font-size:13px;font-weight:bold;")
-        self.lbl_next_artist=QLabel(""); self.lbl_next_artist.setStyleSheet("color:#777;font-size:11px;")
-        lay.addWidget(self.lbl_next_title); lay.addWidget(self.lbl_next_artist)
-        lbl2=QLabel("PRÓXIMO EVENTO"); lbl2.setStyleSheet("color:#444;font-size:9px;letter-spacing:2px;margin-top:4px;"); lay.addWidget(lbl2)
-        self.lbl_next_event=QLabel("—"); self.lbl_next_event.setStyleSheet("color:#ff6600;font-size:11px;")
-        self.lbl_countdown=QLabel(""); self.lbl_countdown.setStyleSheet("color:#555;font-size:10px;")
-        lay.addWidget(self.lbl_next_event); lay.addWidget(self.lbl_countdown)
-        lay.addStretch()
-        row=QHBoxLayout()
-        for txt,slot in [("⏭ Saltar",self._skip_next),("🔀 Aleatorio",self._shuffle)]:
-            b=QPushButton(txt); b.setFixedHeight(24); b.clicked.connect(slot); row.addWidget(b)
-        lay.addLayout(row); return w
+    # ── STATUSBAR ─────────────────────────
+    def _build_statusbar(self):
+        sb=self.statusBar()
+        self.lbl_st_play=QLabel("● Detenido"); self.lbl_st_play.setStyleSheet("color:#444;")
+        self.lbl_st_stream=QLabel("● Sin conexión"); self.lbl_st_stream.setStyleSheet("color:#444;")
+        self.lbl_st_pl=QLabel("Playlist: 0 pistas")
+        self.lbl_st_listeners=QLabel("Oyentes: 0")
+        sb.addWidget(self.lbl_st_play); sb.addWidget(QLabel(" | "))
+        sb.addWidget(self.lbl_st_stream); sb.addWidget(QLabel(" | "))
+        sb.addWidget(self.lbl_st_pl); sb.addWidget(QLabel(" | "))
+        sb.addWidget(self.lbl_st_listeners)
+        sb.addPermanentWidget(QLabel(f"{APP_BRAND} · {APP_NAME} v{APP_VERSION}"))
 
-    def _panel_stream_status(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(14,8,14,8); lay.setSpacing(4)
-        lbl=QLabel("STREAMING"); lbl.setStyleSheet("color:#444;font-size:9px;letter-spacing:2px;"); lay.addWidget(lbl)
-        sr=QHBoxLayout()
-        self.lbl_sdot=QLabel("●"); self.lbl_sdot.setStyleSheet("color:#550000;font-size:16px;")
-        self.lbl_stext=QLabel("Desconectado"); self.lbl_stext.setStyleSheet("color:#777;font-size:12px;")
-        sr.addWidget(self.lbl_sdot); sr.addWidget(self.lbl_stext); sr.addStretch(); lay.addLayout(sr)
-        grid=QGridLayout(); grid.setSpacing(4)
-        for ri,(k,attr) in enumerate([("Servidor","lbl_si_server"),("Puerto","lbl_si_port"),("Bitrate","lbl_si_bitrate"),("Oyentes","lbl_si_listeners")]):
-            lk=QLabel(k); lk.setStyleSheet("color:#444;font-size:10px;")
-            lv=QLabel("—"); lv.setStyleSheet("color:#ff6600;font-size:11px;font-weight:bold;")
-            setattr(self,attr,lv); grid.addWidget(lk,ri,0); grid.addWidget(lv,ri,1)
-        lay.addLayout(grid); lay.addStretch(); return w
+    # ══════════════════════════════════════
+    #  MENUBAR COMPLETO
+    # ══════════════════════════════════════
+    def _build_menubar(self):
+        mb=self.menuBar()
 
-    def _build_equalizer_section(self):
-        c=QWidget(); c.setFixedHeight(100); c.setStyleSheet("background:#0d0d0d;border-bottom:1px solid #1a1a1a;")
-        lay=QHBoxLayout(c); lay.setContentsMargins(10,6,10,6); lay.setSpacing(10)
-        left=QVBoxLayout()
-        lbl_eq=QLabel("ECUALIZADOR"); lbl_eq.setStyleSheet("color:#333;font-size:9px;letter-spacing:2px;")
-        self.lbl_eq_status=QLabel("SILENCIO"); self.lbl_eq_status.setStyleSheet("color:#444;font-size:10px;font-weight:bold;")
-        left.addWidget(lbl_eq); left.addWidget(self.lbl_eq_status); left.addStretch(); lay.addLayout(left)
-        self.eq_widget=EqualizerWidget(); lay.addWidget(self.eq_widget,1)
-        right=QVBoxLayout()
-        lbl_gc=QLabel(APP_BRAND.upper()); lbl_gc.setStyleSheet("color:#2a2a2a;font-size:9px;letter-spacing:1px;"); lbl_gc.setAlignment(Qt.AlignmentFlag.AlignRight)
-        right.addWidget(lbl_gc); right.addStretch(); lay.addLayout(right)
-        return c
+        # ── ARCHIVO ──
+        fm=mb.addMenu("Archivo")
+        fm.addAction("Nueva playlist",self._new_playlist,QKeySequence("Ctrl+N"))
+        fm.addAction("Abrir playlist",self._open_playlist,QKeySequence("Ctrl+O"))
+        fm.addAction("Guardar playlist",self._save_playlist,QKeySequence("Ctrl+S"))
+        fm.addSeparator(); fm.addAction("Salir",self.close,QKeySequence("Ctrl+Q"))
 
-    def _build_left_panel(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
-        tabs=QTabWidget()
-        tabs.addTab(self._tab_playlist(),"Playlist")
-        tabs.addTab(self._tab_scheduler(),"Scheduler")
-        tabs.addTab(self._tab_jingles(),"Jingles F1–F9")
-        lay.addWidget(tabs,1); lay.addWidget(self._build_transport()); return w
+        # ── EDICIÓN ──
+        em=mb.addMenu("Edición")
+        em.addAction("Seleccionar todo",lambda: self.playlist_table.selectAll(),QKeySequence("Ctrl+A"))
+        em.addAction("Invertir selección")
+        em.addSeparator(); em.addAction("Preferencias")
 
-    def _tab_playlist(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
-        self.playlist_table=QTableWidget(0,5)
-        self.playlist_table.setHorizontalHeaderLabels(["#","Título","Artista","Tipo","Dur."])
-        self.playlist_table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
-        self.playlist_table.horizontalHeader().setSectionResizeMode(2,QHeaderView.ResizeMode.Stretch)
-        self.playlist_table.setColumnWidth(0,28); self.playlist_table.setColumnWidth(3,68); self.playlist_table.setColumnWidth(4,55)
-        self.playlist_table.verticalHeader().setVisible(False)
-        self.playlist_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.playlist_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.playlist_table.doubleClicked.connect(lambda idx: self._play_index(idx.row()))
-        lay.addWidget(self.playlist_table)
-        btn_bar=QWidget(); btn_bar.setStyleSheet("background:#0a0a0a;")
-        bl=QHBoxLayout(btn_bar); bl.setContentsMargins(6,4,6,4); bl.setSpacing(4)
-        for txt,slot in [("+ Archivos",self._add_files),("+ Carpeta",self._add_folder),("✕ Quitar",self._remove_selected),("↑",self._move_up),("↓",self._move_down),("Limpiar",self._clear_playlist)]:
-            b=QPushButton(txt); b.setFixedHeight(22); b.clicked.connect(slot); bl.addWidget(b)
-        bl.addStretch()
-        self.lbl_total=QLabel("0 pistas"); self.lbl_total.setStyleSheet("color:#444;font-size:10px;"); bl.addWidget(self.lbl_total)
-        lay.addWidget(btn_bar); return w
+        # ── VER ──
+        vm=mb.addMenu("Ver")
+        vm.addAction("Explorador de archivos",lambda: None,QKeySequence("F1"))
+        vm.addAction("Buscar",lambda: None,QKeySequence("F2"))
+        vm.addAction("Programador de eventos",lambda: None,QKeySequence("F3"))
+        vm.addAction("FX",lambda: None,QKeySequence("F4"))
+        vm.addSeparator()
+        areas=vm.addMenu("Áreas de trabajo")
+        areas.addAction("Restablecer distribución")
+        vm.addSeparator()
+        vm.addAction("Información de pista",lambda: None,QKeySequence("Ctrl+I"))
+        vm.addAction("Panel izquierdo",lambda: None,QKeySequence("Ctrl+L"))
+        vm.addAction("MIC y VU metros en el centro",lambda: None,QKeySequence("Ctrl+K"))
+        vm.addAction("Barra de estado")
+        vm.addAction("Pantalla completa",self.showFullScreen,QKeySequence("F11"))
+        vm.addSeparator()
+        vm.addAction("Colores y fuentes...")
+        vm.addAction("Columnas de la lista de reproducción...")
+        vm.addSeparator()
+        self.act_autoscroll=vm.addAction("Auto-Scroll en Playlist"); self.act_autoscroll.setCheckable(True); self.act_autoscroll.setChecked(True)
+        vm.addSeparator()
+        # Tema
+        theme_menu=vm.addMenu("Tema")
+        self.act_dark=theme_menu.addAction("Oscuro"); self.act_dark.setCheckable(True); self.act_dark.setChecked(True)
+        self.act_dark.triggered.connect(lambda: self.apply_theme("dark"))
+        self.act_light=theme_menu.addAction("Claro"); self.act_light.setCheckable(True)
+        self.act_light.triggered.connect(lambda: self.apply_theme("light"))
+        vm.addAction("Idioma")
 
-    # ── SCHEDULER MEJORADO ────────────────
-    def _tab_scheduler(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(8,8,8,8); lay.setSpacing(6)
-
-        # Barra superior con cuenta regresiva
-        top=QHBoxLayout()
-        lbl=QLabel("Eventos programados"); lbl.setStyleSheet("color:#888;font-size:11px;"); top.addWidget(lbl)
-        top.addStretch()
-        self.lbl_sched_countdown=QLabel("Próximo: —")
-        self.lbl_sched_countdown.setStyleSheet("color:#ff6600;font-size:11px;font-weight:bold;")
-        top.addWidget(self.lbl_sched_countdown)
-        b=QPushButton("+ Nuevo evento"); b.setFixedHeight(24); b.clicked.connect(self._add_event); top.addWidget(b)
-        lay.addLayout(top)
-
-        # Tabla con columnas mejoradas
-        self.sched_table=QTableWidget(0,6)
-        self.sched_table.setHorizontalHeaderLabels(["Hora","Tipo","Acción","Días","Interrumpe","Estado"])
-        self.sched_table.horizontalHeader().setSectionResizeMode(2,QHeaderView.ResizeMode.Stretch)
-        self.sched_table.setColumnWidth(0,55); self.sched_table.setColumnWidth(1,65)
-        self.sched_table.setColumnWidth(3,110); self.sched_table.setColumnWidth(4,75); self.sched_table.setColumnWidth(5,75)
-        self.sched_table.verticalHeader().setVisible(False)
-        self.sched_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        lay.addWidget(self.sched_table)
-
-        # Botones inferiores
-        bot=QHBoxLayout()
-        btn_del=QPushButton("✕ Eliminar"); btn_del.setFixedHeight(22); btn_del.clicked.connect(self._delete_event)
-        btn_clr=QPushButton("Limpiar todo"); btn_clr.setFixedHeight(22); btn_clr.clicked.connect(self._clear_events)
-        bot.addWidget(btn_del); bot.addWidget(btn_clr); bot.addStretch()
-        lay.addLayout(bot)
-        return w
-
-    def _add_event(self):
-        dlg=QDialog(self); dlg.setWindowTitle("Nuevo evento programado")
-        dlg.setStyleSheet(DARK_STYLE); dlg.setFixedSize(420,420)
-        lay=QVBoxLayout(dlg); lay.setSpacing(8)
-
-        # Hora
-        hr=QHBoxLayout()
-        hr.addWidget(QLabel("Hora (HH:MM):"))
-        te=QTimeEdit(); te.setDisplayFormat("HH:mm"); hr.addWidget(te); hr.addStretch()
-        lay.addLayout(hr)
-
-        # Tipo de evento
-        tr=QHBoxLayout()
-        tr.addWidget(QLabel("Tipo de evento:"))
-        type_combo=QComboBox(); type_combo.addItems(SchedulerEvent.TYPES); tr.addWidget(type_combo); tr.addStretch()
-        lay.addLayout(tr)
-
-        # Descripción
-        lay.addWidget(QLabel("Descripción:"))
-        ae=QLineEdit("Jingle horario"); lay.addWidget(ae)
-
-        # Archivo
-        lay.addWidget(QLabel("Archivo de audio:"))
-        fr=QHBoxLayout(); fe=QLineEdit(); fe.setPlaceholderText("(opcional para Silencio)")
-        fb=QPushButton("..."); fb.setFixedWidth(32)
-        fb.clicked.connect(lambda: fe.setText(QFileDialog.getOpenFileName(dlg,"","","Audio (*.mp3 *.wav *.ogg *.flac)")[0]))
-        fr.addWidget(fe); fr.addWidget(fb); lay.addLayout(fr)
-
-        # Días de la semana
-        lay.addWidget(QLabel("Días activos:"))
-        days_row=QHBoxLayout()
-        day_chks=[]
-        for d in DAYS_ES:
-            chk=QCheckBox(d); chk.setChecked(True); days_row.addWidget(chk); day_chks.append(chk)
-        lay.addLayout(days_row)
-
-        # Opciones
-        opt_row=QHBoxLayout()
-        repeat_chk=QCheckBox("Repetir cada semana"); repeat_chk.setChecked(True)
-        interrupt_chk=QCheckBox("Interrumpir canción actual"); interrupt_chk.setChecked(True)
-        opt_row.addWidget(repeat_chk); opt_row.addWidget(interrupt_chk)
-        lay.addLayout(opt_row)
-
-        # Info
-        info=QLabel("💡 'Interrumpir' detiene la canción actual para reproducir este evento")
-        info.setStyleSheet("color:#555;font-size:10px;"); info.setWordWrap(True); lay.addWidget(info)
-
-        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); lay.addWidget(bb)
-
-        if dlg.exec()==QDialog.DialogCode.Accepted:
-            ev=SchedulerEvent(
-                te.time().toString("HH:mm"), ae.text(), fe.text(),
-                repeat_chk.isChecked(),
-                [c.isChecked() for c in day_chks],
-                type_combo.currentText(),
-                interrupt_chk.isChecked()
-            )
-            self.scheduler_events.append(ev)
-            self._refresh_sched()
-
-    def _delete_event(self):
-        rows=sorted({i.row() for i in self.sched_table.selectedIndexes()},reverse=True)
-        for r in rows:
-            if r<len(self.scheduler_events): self.scheduler_events.pop(r)
-        self._refresh_sched()
-
-    def _clear_events(self):
-        if QMessageBox.question(self,"Limpiar","¿Eliminar todos los eventos?")==QMessageBox.StandardButton.Yes:
-            self.scheduler_events.clear(); self._refresh_sched()
-
-    def _refresh_sched(self):
-        t=self.sched_table; t.setRowCount(len(self.scheduler_events))
-        now=datetime.now().strftime("%H:%M")
-        type_colors={"Jingle":"#ff6600","Spot":"#aa44ff","Playlist":"#00aaff","Silencio":"#888888","Archivo":"#00cc66"}
-        for i,ev in enumerate(self.scheduler_events):
-            t.setRowHeight(i,26)
-            t.setItem(i,0,QTableWidgetItem(ev.time_str))
-            ti=QTableWidgetItem(ev.event_type); ti.setForeground(QColor(type_colors.get(ev.event_type,"#888"))); t.setItem(i,1,ti)
-            t.setItem(i,2,QTableWidgetItem(ev.action))
-            # Días activos
-            days_str="".join(DAYS_ES[d] for d,v in enumerate(ev.days) if v)
-            t.setItem(i,3,QTableWidgetItem(days_str if days_str else "Ninguno"))
-            # Interrumpe
-            int_item=QTableWidgetItem("Sí" if ev.interrupt else "No")
-            int_item.setForeground(QColor("#ff6600" if ev.interrupt else "#555")); t.setItem(i,4,int_item)
-            # Estado
-            done=ev.executed_today or (ev.time_str<now and ev.runs_today())
-            si=QTableWidgetItem("Ejecutado" if done else "Pendiente")
-            si.setForeground(QColor("#00cc66" if done else "#ffaa00")); t.setItem(i,5,si)
-        self._update_countdown()
-
-    def _check_scheduler(self):
-        now=datetime.now().strftime("%H:%M")
-        for ev in self.scheduler_events:
-            if ev.time_str==now and not ev.executed_today and ev.runs_today():
-                ev.executed_today=True
-                if ev.event_type=="Silencio":
-                    self.audio_engine.stop()
-                    self.is_playing=False; self.btn_play.setText("▶")
-                    self.eq_widget.set_playing(False)
-                elif ev.file_path and os.path.exists(ev.file_path):
-                    if ev.interrupt:
-                        self.audio_engine.stop()
-                    self.audio_engine.play(ev.file_path)
-                    self.eq_widget.set_playing(True)
-                    self.lbl_now_title.setText(f"[{ev.event_type}] {ev.action}")
-                    self.lbl_now_artist.setText("Scheduler automático")
-                self._refresh_sched()
-
-    def _update_countdown(self):
-        now=datetime.now()
-        now_str=now.strftime("%H:%M")
-        pending=[(ev.time_str,ev) for ev in self.scheduler_events
-                 if not ev.executed_today and ev.time_str>now_str and ev.runs_today()]
-        pending.sort(key=lambda x:x[0])
-        if pending:
-            t_str,ev=pending[0]
-            h,m=map(int,t_str.split(":")); then=now.replace(hour=h,minute=m,second=0)
-            diff=then-now; mins=int(diff.total_seconds()//60)
-            self.lbl_sched_countdown.setText(f"Próximo: {ev.action} en {mins} min")
-            self.lbl_next_event.setText(f"[{ev.event_type}] {ev.action} — {t_str}")
-            self.lbl_countdown.setText(f"En {mins} min {'(interrumpe)' if ev.interrupt else ''}")
-        else:
-            self.lbl_sched_countdown.setText("Sin eventos pendientes")
-            self.lbl_next_event.setText("—"); self.lbl_countdown.setText("")
-
-    def _tab_jingles(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(10,10,10,10); lay.setSpacing(8)
-        hint=QLabel("Presiona F1–F9 para disparar jingles en vivo. Clic derecho para asignar archivo.")
-        hint.setStyleSheet("color:#555;font-size:11px;"); hint.setWordWrap(True); lay.addWidget(hint)
-        grid=QGridLayout(); grid.setSpacing(6)
-        self.jingle_btns=[]
+        # ── CUÑAS ──
+        cm=mb.addMenu("Cuñas")
+        self._cunas_actions=[]
         for i in range(9):
-            btn=QPushButton(f"  F{i+1}\nJingle {i+1}\n(vacío)")
-            btn.setStyleSheet("QPushButton{background:#141414;color:#ff6600;border:1px solid #2a2a2a;padding:8px 4px;border-radius:5px;min-height:58px;font-size:11px;}"
-                              "QPushButton:hover{background:#1e1e1e;border-color:#ff6600;}"
-                              "QPushButton:pressed{background:#0a0a0a;}")
-            btn.clicked.connect(lambda _,idx=i: self._play_jingle(idx))
-            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            btn.customContextMenuRequested.connect(lambda _,idx=i: self._assign_jingle(idx))
-            self.jingle_btns.append(btn); grid.addWidget(btn,i//3,i%3)
-        lay.addLayout(grid); lay.addStretch(); return w
+            act=cm.addAction(f"{i+1}. {self.jingle_names[i] if hasattr(self,'jingle_names') else 'Cuña '+str(i+1)}")
+            act.triggered.connect(lambda _,idx=i: self._play_jingle(idx))
+            self._cunas_actions.append(act)
+        cm.addSeparator()
+        cm.addAction("Locución de hora",lambda: None, QKeySequence("H"))
+        cm.addAction("Temperatura")
+        cm.addAction("Humedad")
+        cm.addSeparator()
+        cm.addAction("Editar Cuñas...",self._edit_cunas)
 
-    def _build_transport(self):
-        w=QWidget(); w.setFixedHeight(68); w.setStyleSheet("background:#080808;border-top:1px solid #1a1a1a;")
-        lay=QVBoxLayout(w); lay.setContentsMargins(10,4,10,4); lay.setSpacing(4)
-        self.progress_bar=QProgressBar(); self.progress_bar.setMaximum(1000); self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False); self.progress_bar.setFixedHeight(4); lay.addWidget(self.progress_bar)
-        row=QHBoxLayout(); row.setSpacing(6)
-        self.btn_prev=QPushButton("⏮"); self.btn_prev.setFixedSize(28,28); self.btn_prev.clicked.connect(self._play_prev)
-        self.btn_stop=QPushButton("⏹"); self.btn_stop.setObjectName("btnStop"); self.btn_stop.setFixedSize(38,38); self.btn_stop.clicked.connect(self._stop)
-        self.btn_play=QPushButton("▶"); self.btn_play.setObjectName("btnPlay"); self.btn_play.setFixedSize(38,38); self.btn_play.clicked.connect(self._toggle_play)
-        self.btn_next=QPushButton("⏭"); self.btn_next.setFixedSize(28,28); self.btn_next.clicked.connect(self._skip_next)
-        self.btn_mic=QPushButton("🎙"); self.btn_mic.setFixedSize(28,28)
-        for b in [self.btn_prev,self.btn_stop,self.btn_play,self.btn_next,self.btn_mic]: row.addWidget(b)
-        sep=QFrame(); sep.setObjectName("vSep"); sep.setFrameShape(QFrame.Shape.VLine); sep.setFixedWidth(1); row.addWidget(sep)
-        lv=QLabel("Vol"); lv.setStyleSheet("color:#444;font-size:11px;"); row.addWidget(lv)
-        self.vol_slider=QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0,100); self.vol_slider.setValue(85); self.vol_slider.setFixedWidth(90)
-        self.vol_slider.valueChanged.connect(lambda v:(self.lbl_vol_val.setText(f"{v}%"),self.audio_engine.set_volume(v)))
-        row.addWidget(self.vol_slider)
-        self.lbl_vol_val=QLabel("85%"); self.lbl_vol_val.setStyleSheet("color:#ff6600;font-size:11px;min-width:32px;"); row.addWidget(self.lbl_vol_val)
-        row.addStretch()
-        self.lbl_pos=QLabel("00:00 / 00:00"); self.lbl_pos.setStyleSheet("color:#444;font-family:'Courier New';font-size:11px;"); row.addWidget(self.lbl_pos)
-        lay.addLayout(row); return w
+        # ── LISTA ──
+        lm=mb.addMenu("Lista")
+        lm.addAction("Añadir pistas...",self._add_files,QKeySequence("Ctrl+A"))
+        lm.addAction("Añadir comando stop")
+        lm.addAction("Añadir locución de hora",lambda: None,QKeySequence("Ctrl+H"))
+        lm.addAction("Añadir locución de temperatura")
+        lm.addAction("Añadir locución de humedad")
+        lm.addSeparator()
+        lm.addAction("Añadir pista aleatoria...")
+        lm.addAction("Añadir pausa...")
+        lm.addAction("Añadir satélite...")
+        lm.addAction("Añadir conexión de satélite")
+        lm.addAction("Añadir desconexión del satélite")
+        lm.addSeparator()
+        lm.addAction("Añadir radio de internet...",self._add_internet_radio)
+        lm.addSeparator()
+        lm.addAction("Barajar",self._shuffle,QKeySequence("Ctrl+K"))
+        lm.addSeparator()
+        lm.addAction("Ver duración de la selección...")
+        lm.addAction("Actualizar duración")
+        lm.addAction("Actualizar todas las duraciones",self._update_all_durations)
 
-    # ── PANEL DERECHO ─────────────────────
-    def _build_right_panel(self):
-        w=QWidget(); w.setStyleSheet("background:#0d0d0d;")
-        lay=QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
-        tabs=QTabWidget()
-        tabs.addTab(self._tab_streaming(),"Streaming")
-        tabs.addTab(self._tab_metadata(),"Metadatos")
-        tabs.addTab(self._tab_stream_cfg(),"Configuración")
-        lay.addWidget(tabs); return w
+        # ── MEDIA ──
+        mm=mb.addMenu("Media")
+        mm.addAction("Reproducir",self._toggle_play,QKeySequence("P"))
+        mm.addAction("Parar",self._stop,QKeySequence("S"))
+        mm.addAction("Siguiente",self._skip_next,QKeySequence("N"))
+        mm.addAction("Pisador",lambda: None,QKeySequence("T"))
+        mm.addAction("Parar tras la actual",lambda: self.btn_stop_after.setChecked(not self._stop_after),QKeySequence("B"))
+        mm.addSeparator()
+        mm.addAction("Renombrar",lambda: None,QKeySequence("F2"))
 
-    # ── STREAMING REDISEÑADO ──────────────
-    def _tab_streaming(self):
-        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        container=QWidget(); lay=QVBoxLayout(container); lay.setContentsMargins(12,10,12,10); lay.setSpacing(10)
-        scroll.setWidget(container)
+        # ── HERRAMIENTA ──
+        hm=mb.addMenu("Herramienta")
+        hm.addAction("Mezclador...",lambda: None,QKeySequence("X"))
+        rep_aux=hm.addMenu("Reproductores auxiliares")
+        rep_aux.addAction("Reproductor 1"); rep_aux.addAction("Reproductor 2")
+        hm.addAction("Explorador del registro...")
+        hm.addAction("Editor de pisadores...")
+        hm.addSeparator()
+        hm.addAction("Opciones...",lambda: None,QKeySequence("O"))
 
-        # ── Servidor
-        grp=QGroupBox("SERVIDOR"); gl=QGridLayout(grp); gl.setSpacing(8); gl.setContentsMargins(10,14,10,10)
+        # ── STREAMING ──
+        sm=mb.addMenu("Streaming")
+        sm.addAction("Configurar streaming...",self._show_stream_dialog)
+        sm.addSeparator()
+        sm.addAction("Conectar",lambda: self._toggle_stream())
+        sm.addAction("Desconectar",lambda: self.stream_engine.disconnect_stream() if self.stream_engine.is_connected() else None)
+        sm.addSeparator()
+        sm.addAction("Ver estadísticas")
 
-        gl.addWidget(self._lbl("Tipo:"),0,0)
-        self.combo_stype=QComboBox(); self.combo_stype.addItems(["Icecast2","Shoutcast v1","Shoutcast v2"])
-        self.combo_stype.currentIndexChanged.connect(self._on_stype_change)
-        gl.addWidget(self.combo_stype,0,1)
+        # ── AYUDA ──
+        aym=mb.addMenu("Ayuda")
+        aym.addAction("Manual de usuario")
+        aym.addAction("Soporte técnico")
+        aym.addSeparator()
+        aym.addAction(f"Acerca de {APP_NAME}",lambda: QMessageBox.about(self,APP_NAME,
+            f"<b>{APP_NAME} v{APP_VERSION}</b><br><i>{APP_BRAND}</i><br><br>"
+            "Automatizador de Radio Profesional<br>Icecast2 + Shoutcast v1/v2<br><br>"
+            "Inspirado en ZaraRadio y RadioBOSS"))
 
-        gl.addWidget(self._lbl("Host / IP:"),1,0)
-        self.edit_host=QLineEdit("localhost"); self.edit_host.setPlaceholderText("ej: radio.miservidor.com")
-        gl.addWidget(self.edit_host,1,1)
+    # ══════════════════════════════════════
+    #  TEMA CLARO / OSCURO
+    # ══════════════════════════════════════
+    def apply_theme(self, theme):
+        self._theme=theme
+        if theme=="dark":
+            QApplication.instance().setStyleSheet(THEME_DARK)
+            self.btn_theme.setText("☀ Tema claro")
+            if hasattr(self,'act_dark'): self.act_dark.setChecked(True); self.act_light.setChecked(False)
+        else:
+            QApplication.instance().setStyleSheet(THEME_LIGHT)
+            self.btn_theme.setText("🌙 Tema oscuro")
+            if hasattr(self,'act_light'): self.act_light.setChecked(True); self.act_dark.setChecked(False)
 
-        gl.addWidget(self._lbl("Puerto:"),2,0)
-        self.edit_port=QLineEdit("8000"); self.edit_port.setPlaceholderText("8000")
-        gl.addWidget(self.edit_port,2,1)
+    def _toggle_theme(self):
+        self.apply_theme("light" if self._theme=="dark" else "dark")
 
-        self.lbl_mount_label=self._lbl("Montaje:")
-        gl.addWidget(self.lbl_mount_label,3,0)
-        self.edit_mountpoint=QLineEdit("/stream"); self.edit_mountpoint.setPlaceholderText("/stream")
-        gl.addWidget(self.edit_mountpoint,3,1)
-
-        gl.addWidget(self._lbl("Contraseña:"),4,0)
-        self.edit_password=QLineEdit(); self.edit_password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.edit_password.setPlaceholderText("contraseña de fuente")
-        gl.addWidget(self.edit_password,4,1)
-
-        # Botón prueba
-        self.btn_test=QPushButton("🔍 Probar conexión"); self.btn_test.setObjectName("btnTest")
-        self.btn_test.clicked.connect(self._test_connection)
-        gl.addWidget(self.btn_test,5,0,1,2)
-        self.lbl_test_result=QLabel("")
-        self.lbl_test_result.setStyleSheet("font-size:11px;padding:2px 0;")
-        gl.addWidget(self.lbl_test_result,6,0,1,2)
-        lay.addWidget(grp)
-
-        # ── Calidad
-        grp2=QGroupBox("CALIDAD DE AUDIO"); q2=QGridLayout(grp2); q2.setSpacing(8); q2.setContentsMargins(10,14,10,10)
-        q2.addWidget(self._lbl("Formato:"),0,0)
-        self.combo_fmt=QComboBox(); self.combo_fmt.addItems(["MP3","AAC","OGG Vorbis"])
-        q2.addWidget(self.combo_fmt,0,1)
-        q2.addWidget(self._lbl("Bitrate:"),1,0)
-        br_row=QHBoxLayout(); self.br_btns=[]
-        for br in ["64k","128k","192k","320k"]:
-            b=QPushButton(br); b.setCheckable(True); b.setFixedHeight(26); b.setChecked(br=="128k")
-            b.clicked.connect(lambda _,btn=b: self._select_br(btn)); br_row.addWidget(b); self.br_btns.append(b)
-        q2.addLayout(br_row,1,1); lay.addWidget(grp2)
-
-        # ── Oyentes
-        grp3=QGroupBox("OYENTES EN VIVO"); g3=QHBoxLayout(grp3); g3.setContentsMargins(10,14,10,10)
-        self.lbl_listeners=QLabel("0"); self.lbl_listeners.setStyleSheet("color:#00cc66;font-size:28px;font-family:'Courier New';font-weight:bold;")
-        g3.addWidget(self.lbl_listeners)
-        u=QLabel("oyentes\nactivos"); u.setStyleSheet("color:#444;font-size:10px;"); g3.addWidget(u); g3.addStretch()
-        self.lbl_peak=QLabel("Pico: 0"); self.lbl_peak.setStyleSheet("color:#ff6600;font-size:11px;"); g3.addWidget(self.lbl_peak)
-        lay.addWidget(grp3)
-
-        # Botón conectar
-        self.btn_stream=QPushButton("Conectar streaming")
-        self.btn_stream.setObjectName("btnConnect"); self.btn_stream.clicked.connect(self._toggle_stream)
-        lay.addWidget(self.btn_stream); lay.addStretch()
-        return scroll
-
-    def _lbl(self,text):
-        l=QLabel(text); l.setStyleSheet("color:#888;font-size:11px;min-width:80px;"); return l
-
-    def _tab_metadata(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(10,10,10,10); lay.setSpacing(6)
-        for lbl,attr,val in [("Nombre de la radio","edit_rname","Mi Radio Online"),("Descripción","edit_rdesc","Radio 24/7"),("Género musical","edit_rgenre","Pop / Rock"),("Sitio web","edit_rurl","http://miradio.com")]:
-            l=QLabel(lbl); l.setStyleSheet("color:#555;font-size:10px;")
-            e=QLineEdit(val); setattr(self,attr,e); lay.addWidget(l); lay.addWidget(e)
-        grp=QGroupBox("METADATA ACTUAL"); g=QVBoxLayout(grp)
-        self.lbl_meta_artist=QLabel("Artista: —"); self.lbl_meta_title=QLabel("Título: —")
-        self.lbl_meta_artist.setStyleSheet("color:#ff6600;"); self.lbl_meta_title.setStyleSheet("color:#ff6600;")
-        g.addWidget(self.lbl_meta_artist); g.addWidget(self.lbl_meta_title)
-        hint=QLabel("Se actualiza automáticamente con cada canción"); hint.setStyleSheet("color:#333;font-size:10px;"); g.addWidget(hint)
-        lay.addWidget(grp); lay.addStretch(); return w
-
-    def _tab_stream_cfg(self):
-        w=QWidget(); lay=QVBoxLayout(w); lay.setContentsMargins(10,10,10,10); lay.setSpacing(8)
-        grp=QGroupBox("COMPORTAMIENTO"); g=QVBoxLayout(grp)
-        for lbl,attr,val in [("Reconexión automática","chk_reconnect",True),("Crossfade entre canciones","chk_crossfade",True),("Normalización de volumen","chk_normalize",False),("Modo 24/7 sin pausas","chk_247",True),("Silencio automático 2–6 AM","chk_silence",False)]:
-            c=QCheckBox(lbl); c.setChecked(val); setattr(self,attr,c); g.addWidget(c)
-        lay.addWidget(grp)
-        grp2=QGroupBox("CROSSFADE"); g2=QHBoxLayout(grp2)
-        l=QLabel("Duración:"); l.setStyleSheet("color:#555;font-size:11px;"); g2.addWidget(l)
-        self.spin_xfade=QSpinBox(); self.spin_xfade.setRange(0,10); self.spin_xfade.setValue(3); self.spin_xfade.setSuffix(" seg")
-        g2.addWidget(self.spin_xfade); g2.addStretch(); lay.addWidget(grp2); lay.addStretch(); return w
-
-    def _build_status_bar(self):
-        bar=QWidget(); bar.setFixedHeight(20); bar.setStyleSheet("background:#050505;border-top:1px solid #111;")
-        lay=QHBoxLayout(bar); lay.setContentsMargins(10,0,10,0); lay.setSpacing(16)
-        self.lbl_st_play=QLabel("● Detenido"); self.lbl_st_stream=QLabel("● Sin conexión"); self.lbl_st_pl=QLabel("Playlist: 0 pistas")
-        for l in [self.lbl_st_play,self.lbl_st_stream,self.lbl_st_pl]: l.setStyleSheet("color:#333;font-size:10px;"); lay.addWidget(l)
-        lay.addStretch()
-        bl=QLabel(f"{APP_BRAND} · {APP_NAME} v{APP_VERSION}"); bl.setStyleSheet("color:#2a2a2a;font-size:10px;"); lay.addWidget(bl)
-        return bar
-
-    # ── SIGNALS ───────────────────────────
+    # ══════════════════════════════════════
+    #  SIGNALS
+    # ══════════════════════════════════════
     def _connect_signals(self):
         self.audio_engine.songFinished.connect(self._on_song_finished)
         self.audio_engine.positionUpdate.connect(self._on_position_update)
         self.stream_engine.statusChanged.connect(self._on_stream_status)
         self.stream_engine.listenersUpdate.connect(self._on_listeners_update)
 
-    # ── PLAYBACK ──────────────────────────
+    # ══════════════════════════════════════
+    #  PLAYBACK
+    # ══════════════════════════════════════
     def _toggle_play(self):
         if self.is_playing:
             self.audio_engine.pause(); self.is_playing=False; self.btn_play.setText("▶")
             self.eq_widget.set_playing(False); self.lbl_eq_status.setText("PAUSADO")
-            self.lbl_eq_status.setStyleSheet("color:#555;font-size:10px;font-weight:bold;")
-            self.lbl_st_play.setText("● Pausado"); self.lbl_st_play.setStyleSheet("color:#cc8800;font-size:10px;")
+            self.lbl_st_play.setText("● Pausado")
         else:
             if self.current_index<0 and self.playlist: self._play_index(0); return
             self.audio_engine.pause(); self.is_playing=True; self.btn_play.setText("⏸")
@@ -853,56 +1093,72 @@ class PoleCasterWindow(QMainWindow):
 
     def _stop(self):
         self.audio_engine.stop(); self.is_playing=False; self.btn_play.setText("▶")
-        self.progress_bar.setValue(0); self.lbl_pos.setText("00:00 / 00:00"); self.lbl_remaining.setText("--:--")
-        self.eq_widget.set_playing(False); self.lbl_eq_status.setText("SILENCIO")
-        self.lbl_eq_status.setStyleSheet("color:#333;font-size:10px;font-weight:bold;")
-        self.lbl_st_play.setText("● Detenido"); self.lbl_st_play.setStyleSheet("color:#333;font-size:10px;")
+        self.progress_bar.setValue(0); self.lbl_pos.setText("00:00 / 00:00")
+        self.lbl_remaining.setText("--:--"); self.eq_widget.set_playing(False)
+        self.lbl_eq_status.setText("SILENCIO"); self.lbl_st_play.setText("● Detenido")
 
     def _play_index(self,index):
         if index<0 or index>=len(self.playlist): return
         item=self.playlist[index]
-        if not os.path.exists(item.path): QMessageBox.warning(self,"Archivo no encontrado",item.path); return
-        self.current_index=index; self.audio_engine.play(item.path); self.is_playing=True; self.btn_play.setText("⏸")
+        path=item.stream_url if item.item_type==PlaylistItem.TYPE_STREAM else item.path
+        if not path: return
+        if item.item_type!=PlaylistItem.TYPE_STREAM and not os.path.exists(path):
+            QMessageBox.warning(self,"Archivo no encontrado",path); return
+        self.current_index=index; self.audio_engine.play(path)
+        self.is_playing=True; self.btn_play.setText("⏸")
         self.lbl_now_title.setText(item.title); self.lbl_now_artist.setText(item.artist or "—")
-        self.lbl_meta_artist.setText(f"Artista: {item.artist}"); self.lbl_meta_title.setText(f"Título: {item.title}")
         self.eq_widget.set_playing(True); self.lbl_eq_status.setText("EN VIVO")
-        self.lbl_eq_status.setStyleSheet("color:#ff6600;font-size:10px;font-weight:bold;")
         self._set_playing_status(); self._update_next_info(); self._highlight_row(index)
 
     def _set_playing_status(self):
-        self.lbl_st_play.setText("● Reproduciendo"); self.lbl_st_play.setStyleSheet("color:#00cc66;font-size:10px;")
+        self.lbl_st_play.setText("● Reproduciendo"); self.lbl_st_play.setStyleSheet("color:#00cc66;")
 
     def _play_prev(self):
         if self.current_index>0: self._play_index(self.current_index-1)
 
     def _skip_next(self):
+        if self._random and self.playlist:
+            self._play_index(random.randint(0,len(self.playlist)-1)); return
         ni=self.current_index+1
         if ni<len(self.playlist): self._play_index(ni)
+        elif self._repeat_list and self.playlist: self._play_index(0)
         else: self._stop()
 
     def _on_song_finished(self):
-        if hasattr(self,"chk_247") and self.chk_247.isChecked(): self._skip_next()
+        if self._stop_after: self._stop(); self.btn_stop_after.setChecked(False); self._stop_after=False; return
+        if self._repeat_track: self._play_index(self.current_index); return
+        self._skip_next()
 
     def _on_position_update(self,pos,dur):
         if dur>0:
             self.progress_bar.setValue(int(pos/dur*1000))
             self.lbl_pos.setText(f"{int(pos//60):02d}:{int(pos%60):02d} / {int(dur//60):02d}:{int(dur%60):02d}")
             rem=dur-pos; self.lbl_remaining.setText(f"{int(rem//60):02d}:{int(rem%60):02d}")
-            et=datetime.now()+timedelta(seconds=rem); self.lbl_endtime.setText(et.strftime("%H:%M"))
 
-    # ── PLAYLIST ──────────────────────────
+    # ══════════════════════════════════════
+    #  PLAYLIST
+    # ══════════════════════════════════════
     def _add_files(self):
-        files,_=QFileDialog.getOpenFileNames(self,"Agregar audio","","Audio (*.mp3 *.wav *.ogg *.flac *.aac *.m4a *.wma)")
+        files,_=QFileDialog.getOpenFileNames(self,"Añadir pistas","","Audio (*.mp3 *.wav *.ogg *.flac *.aac *.m4a *.wma)")
         for f in files: self.playlist.append(PlaylistItem(f))
         self._refresh_playlist()
 
     def _add_folder(self):
         folder=QFileDialog.getExistingDirectory(self,"Seleccionar carpeta")
-        if not folder: return
+        if folder: self._add_folder_path(folder)
+
+    def _add_folder_path(self,folder):
+        exts={".mp3",".wav",".ogg",".flac",".aac",".m4a",".wma"}
         for fn in sorted(os.listdir(folder)):
-            if os.path.splitext(fn)[1].lower() in {".mp3",".wav",".ogg",".flac",".aac",".m4a",".wma"}:
+            if os.path.splitext(fn)[1].lower() in exts:
                 self.playlist.append(PlaylistItem(os.path.join(folder,fn)))
         self._refresh_playlist()
+
+    def _add_internet_radio(self):
+        dlg=InternetRadioDialog(self)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            item=dlg.get_item()
+            if item: self.playlist.append(item); self._refresh_playlist()
 
     def _remove_selected(self):
         rows=sorted({i.row() for i in self.playlist_table.selectedIndexes()},reverse=True)
@@ -925,17 +1181,21 @@ class PoleCasterWindow(QMainWindow):
 
     def _shuffle(self): random.shuffle(self.playlist); self._refresh_playlist()
 
+    def _update_all_durations(self):
+        QMessageBox.information(self,"Actualizar duraciones","Actualizando duraciones de todas las pistas...")
+
     def _refresh_playlist(self):
         t=self.playlist_table; t.setRowCount(len(self.playlist))
-        tc={"Música":"#448888","Jingle":"#ff6600","Spot":"#aa44ff"}
+        tc={PlaylistItem.TYPE_MUSIC:"#448888",PlaylistItem.TYPE_JINGLE:"#ff6600",
+            PlaylistItem.TYPE_SPOT:"#aa44ff",PlaylistItem.TYPE_STREAM:"#00aaff",
+            PlaylistItem.TYPE_STOP:"#cc4444",PlaylistItem.TYPE_PAUSE:"#888888"}
         for i,item in enumerate(self.playlist):
-            t.setRowHeight(i,26); t.setItem(i,0,QTableWidgetItem(str(i+1)))
+            t.setRowHeight(i,24); t.setItem(i,0,QTableWidgetItem(str(i+1)))
             t.setItem(i,1,QTableWidgetItem(item.title)); t.setItem(i,2,QTableWidgetItem(item.artist))
             ti=QTableWidgetItem(item.item_type); ti.setForeground(QColor(tc.get(item.item_type,"#888"))); t.setItem(i,3,ti)
             t.setItem(i,4,QTableWidgetItem(item.duration_str()))
         td=sum(p.duration for p in self.playlist); h,r=divmod(int(td),3600); m,s=divmod(r,60)
-        ds=f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-        self.lbl_total.setText(f"{len(self.playlist)} pistas — {ds}")
+        self.lbl_total.setText(f"{len(self.playlist)} pistas — {h:02d}:{m:02d}:{s:02d}" if h else f"{len(self.playlist)} pistas — {m:02d}:{s:02d}")
         self.lbl_st_pl.setText(f"Playlist: {len(self.playlist)} pistas"); self._update_next_info()
 
     def _highlight_row(self,index):
@@ -943,92 +1203,175 @@ class PoleCasterWindow(QMainWindow):
             for c in range(self.playlist_table.columnCount()):
                 it=self.playlist_table.item(r,c)
                 if it:
-                    it.setBackground(QColor("#ff660015" if r==index else "transparent"))
+                    it.setBackground(QColor("#ff660018" if r==index else "transparent"))
                     it.setForeground(QColor("#ff8833" if r==index else "#c0c0c0"))
 
     def _update_next_info(self):
         ni=self.current_index+1
         if ni<len(self.playlist):
             self.lbl_next_title.setText(self.playlist[ni].title)
-            self.lbl_next_artist.setText(f"{self.playlist[ni].artist} — {self.playlist[ni].duration_str()}")
-        else: self.lbl_next_title.setText("— Fin de playlist —"); self.lbl_next_artist.setText("")
-        ai=ni+1
-        if ai<len(self.playlist): pass
+            self.lbl_next_dur.setText(f"{self.playlist[ni].artist} — {self.playlist[ni].duration_str()}")
+        else:
+            self.lbl_next_title.setText("— Fin de playlist —"); self.lbl_next_dur.setText("")
 
-    # ── JINGLES ───────────────────────────
+    # ══════════════════════════════════════
+    #  CUÑAS / JINGLES
+    # ══════════════════════════════════════
     def _play_jingle(self,idx):
         p=self.jingles[idx]
         if p and os.path.exists(p): self.audio_engine.play(p)
-        else: QMessageBox.information(self,f"Jingle F{idx+1}","Sin archivo. Clic derecho para asignar.")
+        else: QMessageBox.information(self,f"Cuña {idx+1}","Sin archivo asignado. Usa 'Editar Cuñas...' para asignar.")
 
-    def _assign_jingle(self,idx):
-        p,_=QFileDialog.getOpenFileName(self,f"Jingle F{idx+1}","","Audio (*.mp3 *.wav *.ogg *.flac)")
-        if p:
-            self.jingles[idx]=p
-            self.jingle_btns[idx].setText(f"  F{idx+1}\n{os.path.splitext(os.path.basename(p))[0][:11]}")
+    def _edit_cunas(self):
+        dlg=QDialog(self); dlg.setWindowTitle("Editar Cuñas"); dlg.setFixedSize(500,380)
+        dlg.setStyleSheet(QApplication.instance().styleSheet())
+        lay=QVBoxLayout(dlg)
+        grid=QGridLayout(); grid.setSpacing(6)
+        edits=[]
+        for i in range(9):
+            lbl=QLabel(f"Cuña {i+1}:"); lbl.setStyleSheet("color:#888;font-size:11px;")
+            name_edit=QLineEdit(self.jingle_names[i]); name_edit.setFixedWidth(120)
+            path_edit=QLineEdit(self.jingles[i]); path_edit.setPlaceholderText("(sin archivo)")
+            btn=QPushButton("..."); btn.setFixedWidth(28)
+            btn.clicked.connect(lambda _,pe=path_edit: pe.setText(QFileDialog.getOpenFileName(dlg,"","","Audio (*.mp3 *.wav *.ogg)")[0]))
+            grid.addWidget(lbl,i,0); grid.addWidget(name_edit,i,1); grid.addWidget(path_edit,i,2); grid.addWidget(btn,i,3)
+            edits.append((name_edit,path_edit))
+        lay.addLayout(grid)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Aceptar")
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        lay.addWidget(bb)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            for i,(ne,pe) in enumerate(edits):
+                self.jingle_names[i]=ne.text(); self.jingles[i]=pe.text()
+            if hasattr(self,'_cunas_actions'):
+                for i,act in enumerate(self._cunas_actions):
+                    act.setText(f"{i+1}. {self.jingle_names[i]}")
 
-    def keyPressEvent(self,event):
-        k=event.key()
-        if Qt.Key.Key_F1<=k<=Qt.Key.Key_F9: self._play_jingle(k-Qt.Key.Key_F1)
-        super().keyPressEvent(event)
+    # ══════════════════════════════════════
+    #  SCHEDULER / EVENTOS
+    # ══════════════════════════════════════
+    def _add_event(self):
+        dlg=QDialog(self); dlg.setWindowTitle("Planificar evento"); dlg.setFixedSize(440,420)
+        dlg.setStyleSheet(QApplication.instance().styleSheet())
+        lay=QVBoxLayout(dlg); lay.setSpacing(8)
+        g=QGridLayout(); g.setSpacing(8)
+        g.addWidget(QLabel("Hora:"),0,0)
+        te=QTimeEdit(); te.setDisplayFormat("HH:mm"); g.addWidget(te,0,1)
+        g.addWidget(QLabel("Tipo:"),1,0)
+        tc=QComboBox(); tc.addItems(SchedulerEvent.TYPES); g.addWidget(tc,1,1)
+        g.addWidget(QLabel("Descripción:"),2,0)
+        ae=QLineEdit("Cuña horaria"); g.addWidget(ae,2,1)
+        g.addWidget(QLabel("Fichero:"),3,0)
+        fr=QHBoxLayout(); fe=QLineEdit()
+        fb=QPushButton("..."); fb.setFixedWidth(28)
+        fb.clicked.connect(lambda: fe.setText(QFileDialog.getOpenFileName(dlg,"","","Audio (*.mp3 *.wav *.ogg *.flac)")[0]))
+        fr.addWidget(fe); fr.addWidget(fb); g.addLayout(fr,3,1)
+        lay.addLayout(g)
+        lay.addWidget(QLabel("Días activos:"))
+        dr=QHBoxLayout()
+        dchks=[QCheckBox(d) for d in DAYS_ES]
+        for c in dchks: c.setChecked(True); dr.addWidget(c)
+        lay.addLayout(dr)
+        opt=QHBoxLayout()
+        rc=QCheckBox("Repetir semanalmente"); rc.setChecked(True)
+        ic=QCheckBox("Interrumpir canción actual"); ic.setChecked(True)
+        opt.addWidget(rc); opt.addWidget(ic); lay.addLayout(opt)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Aceptar")
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        lay.addWidget(bb)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            ev=SchedulerEvent(te.time().toString("HH:mm"),ae.text(),fe.text(),
+                rc.isChecked(),[c.isChecked() for c in dchks],tc.currentText(),ic.isChecked())
+            self.scheduler_events.append(ev); self._refresh_sched()
 
-    # ── STREAMING ─────────────────────────
-    def _on_stype_change(self,idx):
-        stype=self.combo_stype.currentText().lower()
-        if "shoutcast v2" in stype: self.lbl_mount_label.setText("Station ID:"); self.edit_mountpoint.setText("1")
-        elif "shoutcast v1" in stype: self.lbl_mount_label.setText("Password fuente:"); self.edit_mountpoint.setText("")
-        else: self.lbl_mount_label.setText("Montaje:"); self.edit_mountpoint.setText("/stream")
+    def _delete_event(self):
+        rows=sorted({i.row() for i in self.events_table.selectedIndexes()},reverse=True)
+        for r in rows:
+            if r<len(self.scheduler_events): self.scheduler_events.pop(r)
+        self._refresh_sched()
 
-    def _select_br(self,clicked):
-        for b in self.br_btns: b.setChecked(False); b.setStyleSheet("")
-        clicked.setChecked(True); clicked.setStyleSheet("background:#ff660022;border-color:#ff6600;color:#ff6600;")
+    def _clear_events(self):
+        if QMessageBox.question(self,"Limpiar","¿Eliminar todos los eventos?")==QMessageBox.StandardButton.Yes:
+            self.scheduler_events.clear(); self._refresh_sched()
 
-    def _test_connection(self):
-        stype=self.combo_stype.currentText().lower()
-        br=int(next((b.text().replace("k","") for b in self.br_btns if b.isChecked()),"128"))
-        cfg={"type":"shoutcast_v1" if "v1" in stype else("shoutcast_v2" if "v2" in stype else "icecast2"),
-             "host":self.edit_host.text(),"port":int(self.edit_port.text() or "8000"),
-             "mountpoint":self.edit_mountpoint.text(),"password":self.edit_password.text(),"bitrate":br}
-        self.stream_engine.configure(cfg)
-        ok,msg=self.stream_engine.test_connection()
-        color="#00cc66" if ok else "#cc3300"
-        icon="✅" if ok else "❌"
-        self.lbl_test_result.setText(f"{icon} {msg}")
-        self.lbl_test_result.setStyleSheet(f"color:{color};font-size:11px;padding:2px 0;")
+    def _refresh_sched(self):
+        t=self.events_table; t.setRowCount(len(self.scheduler_events))
+        tc={"Cuña":"#ff6600","Spot":"#aa44ff","Playlist":"#00aaff","Silencio":"#888","Archivo":"#00cc66","Locución hora":"#ffcc00"}
+        for i,ev in enumerate(self.scheduler_events):
+            t.setRowHeight(i,24)
+            t.setItem(i,0,QTableWidgetItem(ev.time_str))
+            ti=QTableWidgetItem(ev.event_type); ti.setForeground(QColor(tc.get(ev.event_type,"#888"))); t.setItem(i,1,ti)
+            fn=os.path.basename(ev.file_path) if ev.file_path else ev.action; t.setItem(i,2,QTableWidgetItem(fn))
+            t.setItem(i,3,QTableWidgetItem("--:--"))
+            days_str="".join(d for d,v in zip(DAYS_ES,ev.days) if v); t.setItem(i,4,QTableWidgetItem(days_str))
+        self._update_countdown()
+
+    def _check_scheduler(self):
+        now=datetime.now().strftime("%H:%M")
+        for ev in self.scheduler_events:
+            if ev.time_str==now and not ev.executed_today and ev.runs_today():
+                ev.executed_today=True
+                if ev.event_type=="Silencio": self._stop()
+                elif ev.file_path and os.path.exists(ev.file_path):
+                    if ev.interrupt: self.audio_engine.stop()
+                    self.audio_engine.play(ev.file_path)
+                    self.lbl_now_title.setText(f"[{ev.event_type}] {ev.action}")
+                self._refresh_sched()
+
+    def _update_countdown(self):
+        now=datetime.now(); now_str=now.strftime("%H:%M")
+        pending=[(ev.time_str,ev) for ev in self.scheduler_events if not ev.executed_today and ev.time_str>now_str and ev.runs_today()]
+        pending.sort(key=lambda x:x[0])
+        if pending:
+            t_str,ev=pending[0]; h,m=map(int,t_str.split(":")); then=now.replace(hour=h,minute=m,second=0)
+            mins=int((then-now).total_seconds()//60)
+            txt=f"Próximo: [{ev.event_type}] {ev.action} — {t_str} (en {mins} min)"
+            self.lbl_countdown.setText(f"En {mins} min")
+            self.lbl_next_event_bar.setText(txt)
+        else:
+            self.lbl_countdown.setText(""); self.lbl_next_event_bar.setText("Sin eventos pendientes")
+
+    # ══════════════════════════════════════
+    #  STREAMING
+    # ══════════════════════════════════════
+    def _show_stream_dialog(self):
+        dlg=StreamingDialog(self,self._stream_cfg)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            self._stream_cfg=dlg.get_config()
+            self.stream_engine.configure(self._stream_cfg)
+            self.lbl_radio_name.setText(self._stream_cfg.get("radio_name","Mi Radio Online"))
 
     def _toggle_stream(self):
         if self.stream_engine.is_connected():
             self.stream_engine.disconnect_stream()
         else:
-            stype=self.combo_stype.currentText().lower()
-            br=int(next((b.text().replace("k","") for b in self.br_btns if b.isChecked()),"128"))
-            cfg={"type":"shoutcast_v1" if "v1" in stype else("shoutcast_v2" if "v2" in stype else "icecast2"),
-                 "host":self.edit_host.text(),"port":int(self.edit_port.text() or "8000"),
-                 "mountpoint":self.edit_mountpoint.text(),"password":self.edit_password.text(),"bitrate":br,
-                 "format":self.combo_fmt.currentText().lower().split()[0]}
-            self.stream_engine.configure(cfg); self.stream_engine.connect_stream()
+            if not self._stream_cfg:
+                self._show_stream_dialog()
+                if not self._stream_cfg: return
+            self.stream_engine.configure(self._stream_cfg)
+            self.stream_engine.connect_stream()
 
     def _on_stream_status(self,connected,msg):
-        self.lbl_stext.setText(msg)
         if connected:
-            self.lbl_sdot.setStyleSheet("color:#00cc66;font-size:16px;")
-            self.btn_stream.setText("Desconectar streaming"); self.btn_stream.setObjectName("btnDisconnect")
-            self.lbl_st_stream.setText("● Streaming activo"); self.lbl_st_stream.setStyleSheet("color:#ff6600;font-size:10px;")
-            self.lbl_si_server.setText(self.edit_host.text()); self.lbl_si_port.setText(self.edit_port.text())
-            br=next((b.text() for b in self.br_btns if b.isChecked()),"128k")
-            self.lbl_si_bitrate.setText(br+"ps")
+            self.lbl_stream_dot.setStyleSheet("color:#00cc66;font-size:14px;")
+            self.lbl_stream_mini.setText(msg); self.lbl_stream_mini.setStyleSheet("color:#00cc66;font-size:10px;")
+            self.lbl_st_stream.setText("● Streaming activo"); self.lbl_st_stream.setStyleSheet("color:#00cc66;")
         else:
-            self.lbl_sdot.setStyleSheet("color:#550000;font-size:16px;")
-            self.btn_stream.setText("Conectar streaming"); self.btn_stream.setObjectName("btnConnect")
-            self.lbl_st_stream.setText("● Sin conexión"); self.lbl_st_stream.setStyleSheet("color:#333;font-size:10px;")
-            for l in [self.lbl_si_server,self.lbl_si_port,self.lbl_si_bitrate,self.lbl_si_listeners]: l.setText("—")
-        self.btn_stream.setStyleSheet("")
+            self.lbl_stream_dot.setStyleSheet("color:#330000;font-size:14px;")
+            self.lbl_stream_mini.setText("Sin stream"); self.lbl_stream_mini.setStyleSheet("color:#555;font-size:10px;")
+            self.lbl_st_stream.setText("● Sin conexión"); self.lbl_st_stream.setStyleSheet("color:#444;")
 
     def _on_listeners_update(self,count):
-        self.lbl_listeners.setText(str(count)); self.lbl_si_listeners.setText(str(count))
-        if count>self._peak_listeners: self._peak_listeners=count; self.lbl_peak.setText(f"Pico: {count}")
+        if count>self._peak_listeners: self._peak_listeners=count
+        self.lbl_st_listeners.setText(f"Oyentes: {count} (pico: {self._peak_listeners})")
 
-    # ── PLAYLIST FILES ────────────────────
+    # ══════════════════════════════════════
+    #  ARCHIVOS PLAYLIST
+    # ══════════════════════════════════════
     def _new_playlist(self): self._clear_playlist()
 
     def _open_playlist(self):
@@ -1037,8 +1380,7 @@ class PoleCasterWindow(QMainWindow):
         try:
             with open(p,"r",encoding="utf-8") as f: data=json.load(f)
             self.playlist=[PlaylistItem.from_dict(d) for d in data.get("playlist",[])]
-            sched=data.get("scheduler",[])
-            self.scheduler_events=[SchedulerEvent.from_dict(d) for d in sched]
+            self.scheduler_events=[SchedulerEvent.from_dict(d) for d in data.get("scheduler",[])]
             self._refresh_playlist(); self._refresh_sched()
         except Exception as ex: QMessageBox.critical(self,"Error",str(ex))
 
@@ -1051,31 +1393,39 @@ class PoleCasterWindow(QMainWindow):
                            "scheduler":[e.to_dict() for e in self.scheduler_events]},f,indent=2)
         except Exception as ex: QMessageBox.critical(self,"Error",str(ex))
 
-    # ── CONFIG ────────────────────────────
+    # ══════════════════════════════════════
+    #  CLOCK
+    # ══════════════════════════════════════
+    def _update_clock(self):
+        now=datetime.now()
+        self.lbl_clock.setText(now.strftime("%H:%M:%S"))
+        self.lbl_date.setText(now.strftime("%A %d de %B de %Y"))
+        if now.hour==0 and now.minute==0 and now.second<2:
+            for ev in self.scheduler_events: ev.executed_today=False
+
+    # ══════════════════════════════════════
+    #  CONFIG
+    # ══════════════════════════════════════
     def _load_config(self):
         if not os.path.exists(CONFIG_FILE): return
         try:
             with open(CONFIG_FILE) as f: cfg=json.load(f)
-            self.edit_host.setText(cfg.get("host","localhost")); self.edit_port.setText(cfg.get("port","8000"))
-            self.edit_mountpoint.setText(cfg.get("mountpoint","/stream")); self.edit_rname.setText(cfg.get("radio_name","Mi Radio Online"))
+            self._stream_cfg=cfg.get("stream_cfg",{})
+            if self._stream_cfg: self.stream_engine.configure(self._stream_cfg)
             self.jingles=cfg.get("jingles",[""]*9)
-            for i,p in enumerate(self.jingles):
-                if p: self.jingle_btns[i].setText(f"  F{i+1}\n{os.path.splitext(os.path.basename(p))[0][:11]}")
+            self.jingle_names=cfg.get("jingle_names",["Cuña "+str(i+1) for i in range(9)])
+            self.lbl_radio_name.setText(self._stream_cfg.get("radio_name","Mi Radio Online"))
+            theme=cfg.get("theme","dark"); self.apply_theme(theme)
             for ev_d in cfg.get("scheduler",[]): self.scheduler_events.append(SchedulerEvent.from_dict(ev_d))
             self._refresh_sched()
         except: pass
 
     def _save_config(self):
-        cfg={"host":self.edit_host.text(),"port":self.edit_port.text(),"mountpoint":self.edit_mountpoint.text(),
-             "password":self.edit_password.text(),"radio_name":self.edit_rname.text(),"jingles":self.jingles,
-             "scheduler":[e.to_dict() for e in self.scheduler_events]}
-        with open(CONFIG_FILE,"w") as f: json.dump(cfg,f,indent=2)
-
-    # ── CLOCK ─────────────────────────────
-    def _update_clock(self):
-        now=datetime.now(); self.lbl_clock.setText(now.strftime("%H:%M:%S")); self.lbl_date.setText(now.strftime("%a %d %b"))
-        if now.hour==0 and now.minute==0 and now.second<2:
-            for ev in self.scheduler_events: ev.executed_today=False
+        cfg={"stream_cfg":self._stream_cfg,"jingles":self.jingles,"jingle_names":self.jingle_names,
+             "theme":self._theme,"scheduler":[e.to_dict() for e in self.scheduler_events]}
+        try:
+            with open(CONFIG_FILE,"w") as f: json.dump(cfg,f,indent=2)
+        except: pass
 
     def closeEvent(self,event):
         self._save_config(); self.audio_engine.stop()
@@ -1087,13 +1437,15 @@ class PoleCasterWindow(QMainWindow):
 #  MAIN
 # ══════════════════════════════════════════
 def main():
-    app=QApplication(sys.argv); app.setApplicationName(APP_NAME); app.setApplicationVersion(APP_VERSION)
-    app.setStyleSheet(DARK_STYLE)
+    app=QApplication(sys.argv)
+    app.setApplicationName(APP_NAME); app.setApplicationVersion(APP_VERSION)
     pal=app.palette()
-    pal.setColor(QPalette.ColorRole.Window,QColor("#0d0d0d")); pal.setColor(QPalette.ColorRole.WindowText,QColor("#e8e8e8"))
-    pal.setColor(QPalette.ColorRole.Base,QColor("#0a0a0a")); pal.setColor(QPalette.ColorRole.Text,QColor("#e8e8e8"))
-    pal.setColor(QPalette.ColorRole.Button,QColor("#1a1a1a")); pal.setColor(QPalette.ColorRole.ButtonText,QColor("#e8e8e8"))
-    pal.setColor(QPalette.ColorRole.Highlight,QColor("#ff6600")); pal.setColor(QPalette.ColorRole.HighlightedText,QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.Window,QColor("#0d0d0d"))
+    pal.setColor(QPalette.ColorRole.WindowText,QColor("#e8e8e8"))
+    pal.setColor(QPalette.ColorRole.Base,QColor("#0a0a0a"))
+    pal.setColor(QPalette.ColorRole.Text,QColor("#e8e8e8"))
+    pal.setColor(QPalette.ColorRole.Highlight,QColor("#ff6600"))
+    pal.setColor(QPalette.ColorRole.HighlightedText,QColor("#ffffff"))
     app.setPalette(pal)
     win=PoleCasterWindow(); win.show(); sys.exit(app.exec())
 
