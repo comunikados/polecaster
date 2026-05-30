@@ -1,5 +1,5 @@
 #define MyAppName "PoleCaster"
-#define MyAppVersion "2.0"
+#define MyAppVersion "3.0"
 #define MyAppPublisher "Grup Comunikados"
 #define MyAppExeName "PoleCaster.exe"
 
