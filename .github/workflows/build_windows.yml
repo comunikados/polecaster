@@ -67,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PoleCaster_Setup_Windows
-          path: dist_installer\PoleCaster_Setup_v2.0.exe
+          path: dist_installer\PoleCaster_Setup_v3.0.exe
           retention-days: 30
 
       # 9. (Opcional) Crear Release si hay un tag
@@ -75,7 +75,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist_installer\PoleCaster_Setup_v2.0.exe
+          files: dist_installer\PoleCaster_Setup_v3.0.exe
           name: PoleCaster v2.0 — Grup Comunikados
           body: |
             ## PoleCaster v2.0 — Grup Comunikados
