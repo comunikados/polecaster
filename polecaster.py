@@ -30,6 +30,14 @@ APP_MEMORY  = "En memoria de Polechita — 10 de Mayo 2026"
 CONFIG_FILE = "polecaster_config.json"
 DAYS_ES     = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
 
+def get_resource_path(relative_path):
+    """Ruta correcta en desarrollo y en PyInstaller bundle"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+LOGO_PATH = get_resource_path(os.path.join("assets", "logo.png"))
+
 # ══════════════════════════════════════════════════════
 #  TEMAS
 # ══════════════════════════════════════════════════════
@@ -175,10 +183,12 @@ class EqualizerWidget(QWidget):
         self._bars=28; self._h=[0.0]*28; self._t=[0.0]*28
         self._pk=[0.0]*28; self._pkh=[0]*28
         self._playing=False; self._mic_active=False; self._phase=0.0
+        self._dark_theme=True  # adapta al tema
         t=QTimer(self); t.timeout.connect(self._animate); t.start(40)
 
     def set_playing(self,v): self._playing=v
     def set_mic(self,v): self._mic_active=v
+    def set_dark(self,v): self._dark_theme=v; self.update()
 
     def _animate(self):
         self._phase+=0.08
@@ -211,12 +221,17 @@ class EqualizerWidget(QWidget):
     def paintEvent(self,event):
         p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w,h=self.width(),self.height()
-        p.fillRect(0,0,w,h,QColor("#0a0a0a"))
+        # Fondo adaptado al tema con borde
+        bg=QColor("#0a0a0a") if self._dark_theme else QColor("#1a1a1a")
+        border=QColor("#2a2a2a") if self._dark_theme else QColor("#333333")
+        p.fillRect(0,0,w,h,bg)
+        # Borde del ecualizador
+        p.setPen(QPen(border,1)); p.drawRect(0,0,w-1,h-1)
         n=self._bars; gap=2; bw=max(3,(w-gap*(n+1))//n); total=bw+gap
         for i in range(n):
-            x=gap+i*total; bh=int(self._h[i]*(h-6))
-            if bh<1: p.fillRect(x,h-2,bw,2,QColor("#1a1a1a")); continue
-            y=h-bh-2; ratio=self._h[i]
+            x=gap+i*total; bh=int(self._h[i]*(h-8))
+            if bh<1: p.fillRect(x,h-3,bw,2,QColor("#1a1a1a") if self._dark_theme else QColor("#333")); continue
+            y=h-bh-3; ratio=self._h[i]
             if self._mic_active:
                 if ratio<0.5: r=0;g=180;b=255
                 elif ratio<0.8: r=0;g=100;b=255
@@ -229,8 +244,8 @@ class EqualizerWidget(QWidget):
             grad.setColorAt(0,QColor(r,g,b,180))
             grad.setColorAt(1,QColor(min(255,r+50),min(255,g+50),min(255,b+30),255))
             p.fillRect(x,y,bw,bh,grad)
-            py=int((1-self._pk[i])*(h-6))
-            p.fillRect(x,py,bw,2,QColor(255,200,100,200))
+            py=int((1-self._pk[i])*(h-8))
+            p.fillRect(x,py,bw,2,QColor(255,220,120,220))
         p.end()
 
 
@@ -422,67 +437,133 @@ class StreamEngine(QThread):
             else: return False,f"No se puede conectar a {host}:{port}"
         except Exception as ex: return False,str(ex)
 
+    def connect_stream_safe(self):
+        """Versión segura para llamar desde thread — emite señales"""
+        ok, msg = self._do_connect()
+        if not ok:
+            self.statusChanged.emit(False, msg)
+
     def connect_stream(self):
+        ok, msg = self._do_connect()
+        return ok
+
+    def _do_connect(self):
         c=self._cfg
-        if not c: return False
+        if not c: return False,"Sin configuración"
         stype=c.get("type","icecast2")
-
-        # Para Shoutcast v1 y v2 se usa protocolo diferente
-        if "shoutcast_v1" in stype:
-            # Shoutcast v1: PUT /
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/"
-        elif "shoutcast_v2" in stype:
-            sid=c.get("sid","1")
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}/{sid}"
-        else:
-            # Icecast2
-            mount=c.get("mountpoint","/stream")
-            if not mount.startswith("/"): mount="/"+mount
-            url=f"icecast://source:{c['password']}@{c['host']}:{c['port']}{mount}"
-
+        host=c.get("host","").strip()
+        port_str=c.get("port","8000").strip()
+        password=c.get("password","").strip()
+        mount=c.get("mountpoint","1").strip()
         br=c.get("bitrate",128)
         fmt=c.get("format","mp3").lower()
+        audio_device=c.get("audio_device","Default (sistema)")
+
+        try: port=int(port_str)
+        except: return False,f"Puerto inválido: {port_str}"
+
+        # ── Construir URL correcta según tipo
+        if "shoutcast_v1" in stype:
+            # Shoutcast v1: source:password
+            url=f"icecast://source:{password}@{host}:{port}/"
+        elif "shoutcast_v2" in stype:
+            # Shoutcast v2: SID es número (ej: 1)
+            sid=mount.lstrip("/").strip() or "1"
+            try: int(sid)
+            except: sid="1"
+            # Shoutcast v2 acepta source o admin
+            url=f"icecast://source:{password}@{host}:{port}/{sid}"
+        else:
+            # Icecast2
+            if not mount.startswith("/"): mount="/"+mount
+            url=f"icecast://source:{password}@{host}:{port}{mount}"
+
+        # Codec
         if fmt=="mp3": codec="libmp3lame"; ofmt="mp3"
         elif fmt=="aac": codec="aac"; ofmt="adts"
         else: codec="libvorbis"; ofmt="ogg"
 
         vol_filter=f"volume={self._stream_vol/100.0:.2f}"
 
-        # Fuente de audio del sistema
-        audio_device=c.get("audio_device","")
+        # Buscar FFmpeg — primero junto al exe (bundle), luego en el sistema
+        exe_dir = os.path.dirname(sys.executable) if hasattr(sys,'_MEIPASS') else os.path.dirname(os.path.abspath(__file__))
+        ffmpeg_paths=[
+            os.path.join(exe_dir,"ffmpeg.exe"),           # junto al exe instalado
+            os.path.join(exe_dir,"ffmpeg","ffmpeg.exe"),  # subcarpeta
+            get_resource_path("ffmpeg.exe"),               # bundle PyInstaller
+            "ffmpeg","ffmpeg.exe",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Users\Public\ffmpeg\bin\ffmpeg.exe",
+        ]
+        ffmpeg_cmd=None
+        for fp in ffmpeg_paths:
+            try:
+                result=subprocess.run([fp,"-version"],capture_output=True,timeout=3)
+                if result.returncode==0: ffmpeg_cmd=fp; break
+            except: continue
+
+        if not ffmpeg_cmd:
+            self.statusChanged.emit(False,
+                "FFmpeg no instalado. Descárgalo de ffmpeg.org y colócalo en C:\\ffmpeg\\bin\\")
+            return False
+
+        # Fuente de audio
         if sys.platform=="win32":
-            if audio_device and audio_device!="Default (sistema)":
-                asrc=["-f","dshow","-i",f"audio={audio_device}"]
-            else:
+            # Intentar diferentes dispositivos de audio
+            devices_to_try=[]
+            if audio_device and audio_device not in ["Default (sistema)"]:
+                devices_to_try.append(audio_device)
+            devices_to_try+=["Mezcla estéreo","Stereo Mix","What U Hear",
+                              "Loopback","wave","Salida de audio"]
+            asrc=None
+            for dev in devices_to_try:
+                test_cmd=[ffmpeg_cmd,"-f","dshow","-i",f"audio={dev}","-t","0.1","-f","null","-"]
+                try:
+                    r=subprocess.run(test_cmd,capture_output=True,timeout=5)
+                    if r.returncode==0 or b"Output" in r.stderr:
+                        asrc=["-f","dshow","-i",f"audio={dev}"]; break
+                except: continue
+            if not asrc:
                 asrc=["-f","dshow","-i","audio=Mezcla estéreo"]
         elif sys.platform=="darwin":
             asrc=["-f","avfoundation","-i",":0"]
         else:
             asrc=["-f","pulse","-i","default"]
 
-        cmd=(["ffmpeg","-re"]+asrc+
-             ["-af",vol_filter,"-acodec",codec,"-ab",f"{br}k",
-              "-ar","44100","-f",ofmt,url,"-y"])
+        cmd=[ffmpeg_cmd,"-re"]+asrc+[
+            "-af",vol_filter,
+            "-acodec",codec,"-ab",f"{br}k",
+            "-ar","44100","-f",ofmt,url,"-y"]
 
-        print(f"Conectando: {' '.join(cmd)}")
+        flags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0
         try:
             self._process=subprocess.Popen(
-                cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-            # Esperar un momento para ver si falló
-            time.sleep(2)
+                cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                creationflags=flags)
+            time.sleep(3)
             if self._process.poll() is not None:
-                err=self._process.stderr.read().decode("utf-8","ignore")[-300:]
-                self.statusChanged.emit(False,f"Error FFmpeg: {err[:100]}")
-                return False
+                err=self._process.stderr.read().decode("utf-8","ignore")
+                # Analizar error específico
+                if "Connection refused" in err or "refused" in err.lower():
+                    return False,"❌ Conexión rechazada — verifica host y puerto"
+                elif "401" in err or "password" in err.lower() or "Unauthorized" in err:
+                    return False,"❌ Contraseña incorrecta"
+                elif "No such" in err or "dshow" in err.lower():
+                    return False,"❌ Dispositivo de audio no encontrado"
+                elif "Invalid" in err:
+                    return False,"❌ Datos inválidos — verifica configuración"
+                else:
+                    short=err.replace("\n"," ").strip()[-200:]
+                    return False,f"❌ FFmpeg: {short}"
             self._connected=True
-            label="Shoutcast" if "shoutcast" in stype else "Icecast2"
-            self.statusChanged.emit(True,f"Conectado — {label} {c['host']}:{c['port']}")
-            self._mon.start(12000); return True
-        except FileNotFoundError:
-            self.statusChanged.emit(False,"FFmpeg no encontrado — instálalo primero")
-            return False
+            label="Shoutcast v2" if "v2" in stype else ("Shoutcast v1" if "v1" in stype else "Icecast2")
+            msg=f"✅ Conectado — {label} {host}:{port}"
+            self.statusChanged.emit(True,msg)
+            self._mon.start(15000)
+            return True,msg
         except Exception as ex:
-            self.statusChanged.emit(False,str(ex)); return False
+            return False,f"❌ Error: {str(ex)}"
 
     def disconnect_stream(self):
         if self._process:
@@ -718,7 +799,10 @@ class PoleCasterWindow(QMainWindow):
         self._current_stream_item_idx=-1
 
         self.audio_engine=AudioEngine(); self.stream_engine=StreamEngine()
-        self._logo_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),"assets","logo.png")
+        self._logo_path=LOGO_PATH
+        # Icono de la ventana y la barra de tareas
+        if os.path.exists(LOGO_PATH):
+            self.setWindowIcon(QIcon(LOGO_PATH))
 
         self._build_ui(); self._connect_signals(); self._load_config()
 
@@ -1166,12 +1250,13 @@ class PoleCasterWindow(QMainWindow):
         self.btn_stop_after=QPushButton("⏹¹"); self.btn_stop_after.setFixedSize(34,34); self.btn_stop_after.setStyleSheet(s_sq); self.btn_stop_after.setCheckable(True); self.btn_stop_after.setToolTip("Parar tras pista actual"); self.btn_stop_after.clicked.connect(lambda c:setattr(self,'_stop_after',c))
         self.btn_random=QPushButton("🔀"); self.btn_random.setFixedSize(34,34); self.btn_random.setStyleSheet(s_sq); self.btn_random.setCheckable(True); self.btn_random.setToolTip("Aleatorio"); self.btn_random.clicked.connect(lambda c:setattr(self,'_random',c))
         self.btn_rep_list=QPushButton("🔁"); self.btn_rep_list.setFixedSize(34,34); self.btn_rep_list.setStyleSheet(s_sq); self.btn_rep_list.setCheckable(True); self.btn_rep_list.setToolTip("Repetir lista"); self.btn_rep_list.clicked.connect(lambda c:setattr(self,'_repeat_list',c))
+        self.btn_normalize=QPushButton("⚡"); self.btn_normalize.setFixedSize(34,34); self.btn_normalize.setStyleSheet(s_sq); self.btn_normalize.setCheckable(True); self.btn_normalize.setToolTip("Normalizar volumen (mismo nivel en todas las canciones)")
 
         for b in [self.btn_prev,self.btn_stop,self.btn_play,self.btn_next]: lay.addWidget(b)
         def vsep():
             f=QFrame(); f.setFrameShape(QFrame.Shape.VLine); f.setStyleSheet("background:#222;max-width:1px;min-height:24px;"); return f
         lay.addWidget(vsep())
-        for b in [self.btn_rep_track,self.btn_stop_after,self.btn_random,self.btn_rep_list]: lay.addWidget(b)
+        for b in [self.btn_rep_track,self.btn_stop_after,self.btn_random,self.btn_rep_list,self.btn_normalize]: lay.addWidget(b)
         lay.addWidget(vsep())
         self.lbl_pos=QLabel("00:00 / 00:00"); self.lbl_pos.setStyleSheet("color:#555;font-family:'Courier New';font-size:11px;"); lay.addWidget(self.lbl_pos)
         lay.addStretch()
@@ -1362,10 +1447,9 @@ class PoleCasterWindow(QMainWindow):
         if hasattr(self,'lbl_now_title'): self.lbl_now_title.setStyleSheet(f"color:{title_c};font-size:13px;font-weight:bold;")
         if hasattr(self,'lbl_remaining'): self.lbl_remaining.setStyleSheet(f"color:{clk_c};font-family:'Courier New';font-size:14px;font-weight:bold;")
 
-        # Ecualizador fondo
+        # Actualizar ecualizador
         if hasattr(self,'eq_widget'):
-            eq_bg="#0a0a0a" if theme=="dark" else "#e8e8e8"
-            # El ecualizador siempre pinta su propio fondo, OK
+            self.eq_widget.set_dark(theme=="dark")
 
     def _toggle_theme(self):
         self.apply_theme("light" if self._theme=="dark" else "dark")
@@ -1675,14 +1759,21 @@ class PoleCasterWindow(QMainWindow):
         else:
             if not self._stream_cfg or not self._stream_cfg.get("host",""):
                 reply=QMessageBox.question(self,"Configurar streaming",
-                    "No hay configuración de streaming guardada.\n¿Abrir configuración ahora?")
+                    "No hay configuración guardada.\n¿Abrir configuración ahora?")
                 if reply==QMessageBox.StandardButton.Yes: self._show_stream_dialog()
                 if not self._stream_cfg or not self._stream_cfg.get("host",""): return
             self.stream_engine.configure(self._stream_cfg)
-            # Ejecutar en hilo separado para no bloquear UI
-            threading.Thread(target=self.stream_engine.connect_stream,daemon=True).start()
+            self.btn_stream_quick.setText("⬤  Conectando...")
+            self.btn_stream_quick.setEnabled(False)
+            self._stream_worker=threading.Thread(target=self._connect_stream_bg,daemon=True)
+            self._stream_worker.start()
+
+    def _connect_stream_bg(self):
+        """Conectar streaming en background — emite señales al terminar"""
+        self.stream_engine.connect_stream_safe()
 
     def _on_stream_status(self,connected,msg):
+        self.btn_stream_quick.setEnabled(True)  # Siempre re-habilitar
         if connected:
             self.lbl_stream_dot.setStyleSheet("color:#00cc66;font-size:14px;")
             self.lbl_stream_mini.setText(msg); self.lbl_stream_mini.setStyleSheet("color:#00cc66;font-size:10px;")
@@ -1690,9 +1781,16 @@ class PoleCasterWindow(QMainWindow):
             self.btn_stream_quick.setChecked(True); self.btn_stream_quick.setText("⬤  STREAM ON")
         else:
             self.lbl_stream_dot.setStyleSheet("color:#330000;font-size:14px;")
-            self.lbl_stream_mini.setText(msg or "Sin stream"); self.lbl_stream_mini.setStyleSheet("color:#555;font-size:10px;")
+            self.lbl_stream_mini.setText(msg or "Sin stream"); self.lbl_stream_mini.setStyleSheet("color:#cc4444;font-size:10px;")
             self.lbl_st_stream.setText("⬤ Sin conexión"); self.lbl_st_stream.setStyleSheet("color:#444;")
             self.btn_stream_quick.setChecked(False); self.btn_stream_quick.setText("⬤  STREAM OFF")
+            # Mostrar error en popup si contiene ❌
+            if msg and "❌" in msg:
+                QMessageBox.warning(self,"Error de Streaming",
+                    f"{msg}\n\n"
+                    f"Servidor: {self._stream_cfg.get('host','')}:{self._stream_cfg.get('port','')}\n"
+                    f"Tipo: {self._stream_cfg.get('type','')}\n\n"
+                    "Verifica que FFmpeg esté instalado y los datos sean correctos.")
 
     def _on_listeners_update(self,count):
         if count>self._peak_listeners: self._peak_listeners=count
