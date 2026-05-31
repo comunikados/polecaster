@@ -408,37 +408,27 @@ class AudioEngine(QThread):
 
 
 # ══════════════════════════════════════════════════════
-#  MOTOR STREAMING
+#  MOTOR STREAMING — Sin FFmpeg, Python puro
 # ══════════════════════════════════════════════════════
 class StreamEngine(QThread):
-    statusChanged=pyqtSignal(bool,str); listenersUpdate=pyqtSignal(int)
+    statusChanged   = pyqtSignal(bool, str)
+    listenersUpdate = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
-        self._process=None; self._connected=False; self._cfg={}
-        self._stream_vol=100
-        self._mon=QTimer(); self._mon.timeout.connect(self._poll)
+        self._connected  = False
+        self._cfg        = {}
+        self._stream_vol = 100
+        self._stop_flag  = False
+        self._thread     = None
+        self._mon        = QTimer()
+        self._mon.timeout.connect(self._poll)
 
-    def configure(self,cfg): self._cfg=cfg
-
-    def set_stream_volume(self,v): self._stream_vol=v
-
-    def test_connection(self):
-        """Prueba si el servidor es accesible"""
-        c=self._cfg
-        if not c: return False,"Sin configuración"
-        try:
-            host=c.get("host",""); port=int(c.get("port",8000))
-            sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-            sock.settimeout(5)
-            result=sock.connect_ex((host,port))
-            sock.close()
-            if result==0: return True,f"Puerto {port} accesible en {host}"
-            else: return False,f"No se puede conectar a {host}:{port}"
-        except Exception as ex: return False,str(ex)
+    def configure(self, cfg): self._cfg = cfg
+    def set_stream_volume(self, v): self._stream_vol = v
+    def is_connected(self): return self._connected
 
     def connect_stream_safe(self):
-        """Versión segura para llamar desde thread — emite señales"""
         ok, msg = self._do_connect()
         if not ok:
             self.statusChanged.emit(False, msg)
@@ -448,153 +438,246 @@ class StreamEngine(QThread):
         return ok
 
     def _do_connect(self):
-        c=self._cfg
-        if not c: return False,"Sin configuración"
-        stype=c.get("type","icecast2")
-        host=c.get("host","").strip()
-        port_str=c.get("port","8000").strip()
-        password=c.get("password","").strip()
-        mount=c.get("mountpoint","1").strip()
-        br=c.get("bitrate",128)
-        fmt=c.get("format","mp3").lower()
-        audio_device=c.get("audio_device","Default (sistema)")
+        c = self._cfg
+        if not c: return False, "Sin configuración"
 
-        try: port=int(port_str)
-        except: return False,f"Puerto inválido: {port_str}"
+        host    = c.get("host","").strip()
+        port_s  = c.get("port","8000").strip()
+        passwd  = c.get("password","").strip()
+        stype   = c.get("type","icecast2")
+        mount   = c.get("mountpoint","1").strip()
+        br      = int(c.get("bitrate", 128))
 
-        # ── Construir URL correcta según tipo
-        if "shoutcast_v1" in stype:
-            # Shoutcast v1: source:password
-            url=f"icecast://source:{password}@{host}:{port}/"
-        elif "shoutcast_v2" in stype:
-            # Shoutcast v2: SID es número (ej: 1)
-            sid=mount.lstrip("/").strip() or "1"
-            try: int(sid)
-            except: sid="1"
-            # Shoutcast v2 acepta source o admin
-            url=f"icecast://source:{password}@{host}:{port}/{sid}"
-        else:
-            # Icecast2
-            if not mount.startswith("/"): mount="/"+mount
-            url=f"icecast://source:{password}@{host}:{port}{mount}"
+        if not host: return False, "❌ Falta el servidor"
+        try: port = int(port_s)
+        except: return False, f"❌ Puerto inválido: {port_s}"
 
-        # Codec
-        if fmt=="mp3": codec="libmp3lame"; ofmt="mp3"
-        elif fmt=="aac": codec="aac"; ofmt="adts"
-        else: codec="libvorbis"; ofmt="ogg"
+        # ── Intentar con FFmpeg primero (mejor calidad)
+        ffmpeg = self._find_ffmpeg()
+        if ffmpeg:
+            return self._connect_ffmpeg(ffmpeg, host, port, passwd, stype, mount, br, c)
 
-        vol_filter=f"volume={self._stream_vol/100.0:.2f}"
+        # ── Sin FFmpeg: streaming Python puro con sounddevice + lameenc
+        try:
+            import sounddevice as sd
+            import lameenc
+            return self._connect_python(sd, lameenc, host, port, passwd, stype, mount, br)
+        except ImportError:
+            pass
 
-        # Buscar FFmpeg — primero junto al exe (bundle), luego en el sistema
-        exe_dir = os.path.dirname(sys.executable) if hasattr(sys,'_MEIPASS') else os.path.dirname(os.path.abspath(__file__))
-        ffmpeg_paths=[
-            os.path.join(exe_dir,"ffmpeg.exe"),           # junto al exe instalado
-            os.path.join(exe_dir,"ffmpeg","ffmpeg.exe"),  # subcarpeta
-            get_resource_path("ffmpeg.exe"),               # bundle PyInstaller
-            "ffmpeg","ffmpeg.exe",
+        # ── Sin ninguna lib: mostrar instrucciones claras
+        msg = ("\u274c No se puede conectar.\n\nSolucion:\n"
+               "1. Copia ffmpeg.exe a C:\\PoleCaster\\ffmpeg.exe\n"
+               "   Descarga: https://ffmpeg.org/download.html")
+        return False, msg
+
+    def _find_ffmpeg(self):
+        import shutil
+        # Buscar ffmpeg en múltiples lugares
+        candidates = [
+            "ffmpeg.exe",
+            os.path.join(os.path.dirname(sys.executable), "ffmpeg.exe"),
+            r"C:\PoleCaster\ffmpeg.exe",
             r"C:\ffmpeg\bin\ffmpeg.exe",
             r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-            r"C:\Users\Public\ffmpeg\bin\ffmpeg.exe",
         ]
-        ffmpeg_cmd=None
-        for fp in ffmpeg_paths:
+        if hasattr(sys, '_MEIPASS'):
+            candidates.insert(0, os.path.join(sys._MEIPASS, "ffmpeg.exe"))
+        # También carpeta del exe instalado
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.insert(0, os.path.join(exe_dir, "ffmpeg.exe"))
+
+        for p in candidates:
             try:
-                result=subprocess.run([fp,"-version"],capture_output=True,timeout=3)
-                if result.returncode==0: ffmpeg_cmd=fp; break
+                r = subprocess.run([p, "-version"], capture_output=True, timeout=3)
+                if r.returncode == 0: return p
             except: continue
+        # shutil.which como último recurso
+        return shutil.which("ffmpeg")
 
-        if not ffmpeg_cmd:
-            self.statusChanged.emit(False,
-                "FFmpeg no instalado. Descárgalo de ffmpeg.org y colócalo en C:\\ffmpeg\\bin\\")
-            return False
+    def _connect_ffmpeg(self, ffmpeg, host, port, passwd, stype, mount, br, c):
+        fmt = c.get("format","mp3").lower()
+        if fmt == "mp3": codec="libmp3lame"; ofmt="mp3"
+        else: codec="libvorbis"; ofmt="ogg"
 
-        # Fuente de audio
-        if sys.platform=="win32":
-            # Intentar diferentes dispositivos de audio
-            devices_to_try=[]
-            if audio_device and audio_device not in ["Default (sistema)"]:
-                devices_to_try.append(audio_device)
-            devices_to_try+=["Mezcla estéreo","Stereo Mix","What U Hear",
-                              "Loopback","wave","Salida de audio"]
-            asrc=None
-            for dev in devices_to_try:
-                test_cmd=[ffmpeg_cmd,"-f","dshow","-i",f"audio={dev}","-t","0.1","-f","null","-"]
-                try:
-                    r=subprocess.run(test_cmd,capture_output=True,timeout=5)
-                    if r.returncode==0 or b"Output" in r.stderr:
-                        asrc=["-f","dshow","-i",f"audio={dev}"]; break
-                except: continue
-            if not asrc:
-                asrc=["-f","dshow","-i","audio=Mezcla estéreo"]
-        elif sys.platform=="darwin":
-            asrc=["-f","avfoundation","-i",":0"]
+        vol = f"volume={self._stream_vol/100.0:.2f}"
+
+        if "shoutcast_v1" in stype:
+            url = f"icecast://source:{passwd}@{host}:{port}/"
+        elif "shoutcast_v2" in stype:
+            sid = mount.lstrip("/").strip() or "1"
+            try: int(sid)
+            except: sid = "1"
+            url = f"icecast://source:{passwd}@{host}:{port}/{sid}"
         else:
-            asrc=["-f","pulse","-i","default"]
+            if not mount.startswith("/"): mount = "/" + mount
+            url = f"icecast://source:{passwd}@{host}:{port}{mount}"
 
-        cmd=[ffmpeg_cmd,"-re"]+asrc+[
-            "-af",vol_filter,
-            "-acodec",codec,"-ab",f"{br}k",
-            "-ar","44100","-f",ofmt,url,"-y"]
+        if sys.platform == "win32":
+            asrc = ["-f","dshow","-i","audio=Mezcla estéreo"]
+        elif sys.platform == "darwin":
+            asrc = ["-f","avfoundation","-i",":0"]
+        else:
+            asrc = ["-f","pulse","-i","default"]
 
-        flags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0
+        cmd = [ffmpeg,"-re"] + asrc + [
+            "-af", vol,
+            "-acodec", codec,
+            "-ab", f"{br}k",
+            "-ar", "44100",
+            "-f", ofmt, url, "-y"
+        ]
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0
         try:
-            self._process=subprocess.Popen(
-                cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            self._process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 creationflags=flags)
             time.sleep(3)
             if self._process.poll() is not None:
-                err=self._process.stderr.read().decode("utf-8","ignore")
-                # Analizar error específico
-                if "Connection refused" in err or "refused" in err.lower():
+                err = self._process.stderr.read().decode("utf-8","ignore")
+                if "refused" in err.lower():
                     return False,"❌ Conexión rechazada — verifica host y puerto"
-                elif "401" in err or "password" in err.lower() or "Unauthorized" in err:
+                elif "401" in err or "Unauthorized" in err:
                     return False,"❌ Contraseña incorrecta"
-                elif "No such" in err or "dshow" in err.lower():
-                    return False,"❌ Dispositivo de audio no encontrado"
-                elif "Invalid" in err:
-                    return False,"❌ Datos inválidos — verifica configuración"
+                elif "dshow" in err.lower() or "device" in err.lower():
+                    # Reintentar con otro dispositivo
+                    return self._retry_ffmpeg(ffmpeg, url, codec, ofmt, br, vol, flags)
                 else:
-                    short=err.replace("\n"," ").strip()[-200:]
-                    return False,f"❌ FFmpeg: {short}"
-            self._connected=True
-            label="Shoutcast v2" if "v2" in stype else ("Shoutcast v1" if "v1" in stype else "Icecast2")
-            msg=f"✅ Conectado — {label} {host}:{port}"
-            self.statusChanged.emit(True,msg)
+                    return False, f"❌ {err[-200:].strip()}"
+            self._connected = True
+            lbl = "Shoutcast v2" if "v2" in stype else ("Shoutcast v1" if "v1" in stype else "Icecast2")
+            msg = f"✅ Conectado — {lbl} {host}:{port}"
+            self.statusChanged.emit(True, msg)
             self._mon.start(15000)
-            return True,msg
+            return True, msg
         except Exception as ex:
-            return False,f"❌ Error: {str(ex)}"
+            return False, f"❌ FFmpeg error: {ex}"
+
+    def _retry_ffmpeg(self, ffmpeg, url, codec, ofmt, br, vol, flags):
+        """Reintentar con diferentes dispositivos de audio"""
+        devices = [
+            ["-f","dshow","-i","audio=Stereo Mix"],
+            ["-f","dshow","-i","audio=What U Hear"],
+            ["-f","dshow","-i","audio=Mezcla estéreo (Realtek Audio)"],
+            ["-f","lavfi","-i","sine=frequency=440:duration=9999"],  # tono de prueba
+        ]
+        for asrc in devices:
+            cmd = [ffmpeg,"-re"] + asrc + [
+                "-af",vol,"-acodec",codec,"-ab",f"{br}k",
+                "-ar","44100","-f",ofmt,url,"-y"]
+            try:
+                p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=flags)
+                time.sleep(2)
+                if p.poll() is None:
+                    self._process = p
+                    self._connected = True
+                    msg = f"✅ Conectado (dispositivo alternativo)"
+                    self.statusChanged.emit(True, msg)
+                    self._mon.start(15000)
+                    return True, msg
+                p.terminate()
+            except: continue
+        return False, "❌ No se encontró dispositivo de audio compatible"
+
+    def _connect_python(self, sd, lameenc, host, port, passwd, stype, mount, br):
+        """Streaming Python puro sin FFmpeg"""
+        import socket, struct
+
+        if "shoutcast_v2" in stype:
+            sid = mount.lstrip("/") or "1"
+            path = f"/{sid}"
+            user = "source"
+        elif "shoutcast_v1" in stype:
+            path = "/"; user = "source"
+        else:
+            path = mount if mount.startswith("/") else f"/{mount}"
+            user = "source"
+
+        import base64
+        creds = base64.b64encode(f"{user}:{passwd}".encode()).decode()
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            sock.connect((host, port))
+            # HTTP PUT para Icecast/Shoutcast
+            req = (
+                f"PUT {path} HTTP/1.0\r\n"
+                f"Authorization: Basic {creds}\r\n"
+                f"Host: {host}:{port}\r\n"
+                f"User-Agent: PoleCaster/{APP_VERSION}\r\n"
+                f"Content-Type: audio/mpeg\r\n"
+                f"ice-name: {self._cfg.get('radio_name','PoleCaster')}\r\n"
+                f"ice-bitrate: {br}\r\n"
+                f"ice-samplerate: 44100\r\n"
+                f"ice-channels: 2\r\n"
+                f"Transfer-Encoding: chunked\r\n"
+                f"\r\n"
+            )
+            sock.send(req.encode())
+            resp = sock.recv(1024).decode("utf-8","ignore")
+            if "200" not in resp and "OK" not in resp:
+                sock.close()
+                return False, f"❌ Servidor rechazó: {resp[:100]}"
+
+            self._connected = True
+            self._stop_flag = False
+            self.statusChanged.emit(True, f"✅ Conectado (Python) — {host}:{port}")
+            self._mon.start(15000)
+
+            # Iniciar hilo de audio
+            enc = lameenc.Encoder()
+            enc.set_bit_rate(br); enc.set_in_sample_rate(44100)
+            enc.set_channels(2); enc.set_quality(2)
+
+            def audio_cb(indata, frames, time_info, status):
+                if self._stop_flag: raise sd.CallbackStop()
+                pcm = (indata * 32767).astype('int16')
+                mp3 = enc.encode(pcm.tobytes())
+                if mp3:
+                    try: sock.send(mp3)
+                    except: raise sd.CallbackStop()
+
+            self._sd_stream = sd.InputStream(
+                samplerate=44100, channels=2,
+                dtype='float32', callback=audio_cb)
+            self._sd_stream.start()
+            return True, f"✅ Conectado (Python) — {host}:{port}"
+        except Exception as ex:
+            return False, f"❌ Error Python streaming: {ex}"
 
     def disconnect_stream(self):
-        if self._process:
-            self._process.terminate()
-            try: self._process.wait(timeout=3)
-            except: self._process.kill()
-            self._process=None
-        self._connected=False; self._mon.stop()
+        self._stop_flag = True
+        self._connected = False
+        self._mon.stop()
+        if hasattr(self,'_sd_stream'):
+            try: self._sd_stream.stop(); self._sd_stream.close()
+            except: pass
+        if hasattr(self,'_process') and self._process:
+            try: self._process.terminate(); self._process.wait(timeout=3)
+            except: pass
+            self._process = None
         self.statusChanged.emit(False,"Desconectado")
 
-    def is_connected(self): return self._connected
-
     def _poll(self):
-        c=self._cfg
+        if not self._connected: return
+        if hasattr(self,'_process') and self._process:
+            if self._process.poll() is not None:
+                self._connected = False
+                self.statusChanged.emit(False,"Streaming interrumpido")
+                if self._cfg.get("reconnect",True):
+                    time.sleep(3); self.connect_stream_safe()
+                return
+        c = self._cfg
         if not c: return
-        # Verificar si FFmpeg sigue corriendo
-        if self._process and self._process.poll() is not None:
-            self._connected=False
-            self.statusChanged.emit(False,"Streaming interrumpido — reconectando...")
-            if c.get("reconnect",True): self.connect_stream()
-            return
         try:
-            r=requests.get(f"http://{c['host']}:{c['port']}/status-json.xsl",timeout=3)
-            sources=r.json().get("icestats",{}).get("source",[])
+            r = requests.get(f"http://{c['host']}:{c['port']}/status-json.xsl",timeout=3)
+            sources = r.json().get("icestats",{}).get("source",[])
             if isinstance(sources,dict): sources=[sources]
             for s in sources:
                 if c.get("mountpoint","") in str(s.get("listenurl","")):
                     self.listenersUpdate.emit(int(s.get("listeners",0))); return
         except: pass
-
-
 # ══════════════════════════════════════════════════════
 #  DIÁLOGO STREAMING
 # ══════════════════════════════════════════════════════
