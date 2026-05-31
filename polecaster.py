@@ -1220,7 +1220,7 @@ class PoleCasterWindow(QMainWindow):
         areas=vm.addMenu("Áreas de trabajo")
         for i in range(1,5):
             a=QAction(f"Área {i}",self); a.setShortcut(QKeySequence(f"Ctrl+{i}")); areas.addAction(a)
-        areas.addSeparator(); areas.addAction("Área adicional",None,QKeySequence("Ctrl+4"))
+        areas.addSeparator(); areas.addAction("Área adicional")
         vm.addAction(act("Información de pista",lambda: None,"Ctrl+I"))
         vm.addAction(act("Panel izquierdo",lambda: None,"Ctrl+L"))
         vm.addAction(act("MIC y VU metros en el centro",lambda: None,"Ctrl+K"))
