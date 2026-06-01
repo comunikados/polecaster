@@ -24,7 +24,7 @@ from PyQt6.QtGui import (
 )
 
 APP_NAME    = "PoleCaster"
-APP_VERSION = "3.2"
+APP_VERSION = "3.3"
 APP_BRAND   = "Grup Comunikados con K"
 APP_MEMORY  = "En memoria de Polechita — 10 de Mayo 2026"
 CONFIG_FILE = "polecaster_config.json"
